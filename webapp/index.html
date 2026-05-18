@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portacount 8030 — WebUSB</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Portacount 8030 — WebUSB</h1>
+
+    <div class="cols">
+      <div class="left-col">
+        <section id="connect-section">
+          <button id="connect-btn">Connect Portacount</button>
+          <button id="disconnect-btn" disabled>Disconnect</button>
+        </section>
+
+        <section id="status">
+          <h2>Stack</h2>
+          <div id="usb-status" class="status-item pending">
+            <span class="label">USB / RNDIS</span><span class="value">Idle</span>
+          </div>
+          <div id="dhcp-status" class="status-item pending">
+            <span class="label">DHCP</span><span class="value">Idle</span>
+          </div>
+          <div id="runtime-status" class="status-item pending">
+            <span class="label">Runtime probe (3602)</span><span class="value">Idle</span>
+          </div>
+          <div id="handshake-status" class="status-item pending">
+            <span class="label">XML handshake (3603)</span><span class="value">Idle</span>
+          </div>
+        </section>
+
+        <section id="identity">
+          <h2>Device</h2>
+          <div class="status-item"><span class="label">Serial number</span><span class="value" id="sn-val">—</span></div>
+          <div class="status-item"><span class="label">Model number</span><span class="value" id="model-val">—</span></div>
+          <div class="status-item"><span class="label">Build string</span><span class="value" id="build-val">—</span></div>
+        </section>
+
+        <section id="sampling">
+          <h2>Sampling</h2>
+          <button id="start-btn" disabled>Start sampling</button>
+          <button id="stop-btn" disabled>Stop sampling</button>
+          <div class="status-item" style="margin-top: 0.75rem;">
+            <span class="label">Status</span><span class="value" id="rt-status">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Ambient concentration</span><span class="value" id="rt-amb">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Mask concentration</span><span class="value" id="rt-mask">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Fit factor</span><span class="value" id="rt-ff">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Message</span><span class="value" id="rt-msg">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Low-alcohol warning</span><span class="value" id="rt-low">—</span>
+          </div>
+        </section>
+
+        <section id="log">
+          <h2>
+            Event log
+            <label class="log-toggle">
+              <input type="checkbox" id="xml-trace-toggle">
+              Log XML traffic
+            </label>
+          </h2>
+          <div id="event-log"></div>
+        </section>
+      </div>
+
+      <div class="right-col">
+        <section id="session-history">
+          <h2>Sessions</h2>
+          <div id="session-list"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="main.ts"></script>
+</body>
+</html>

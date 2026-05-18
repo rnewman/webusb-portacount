@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.vite/
+emsdk/
+captures/
+local/
+vendor/
+
+# Editor backups
+*~
+
+# Per-user Claude Code settings
+.claude/settings.local.json

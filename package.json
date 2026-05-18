@@ -1,0 +1,41 @@
+{
+  "name": "portacount-webusb",
+  "version": "0.1.0",
+  "description": "WebUSB connectivity for the PortaCount Pro 8030 — RNDIS wire layer, lwIP-in-Wasm TCP/IP stack, and XML-over-TCP protocol client.",
+  "author": "Richard Newman <rnewman@twinql.com>",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rnewman/webusb-portacount.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rnewman/webusb-portacount/issues"
+  },
+  "homepage": "https://github.com/rnewman/webusb-portacount#readme",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "./scripts/build-wasm.sh",
+    "dev": "vite",
+    "build": "npm run build:wasm && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "probe": "tsx scripts/probe-portacount.ts",
+    "probe:tcp": "tsx scripts/probe-tcp.ts",
+    "probe:listen": "tsx scripts/probe-listen.ts",
+    "probe:handshake": "tsx scripts/probe-handshake.ts",
+    "dump:pcap": "tsx scripts/dump-pcap.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/w3c-web-usb": "^1.0.14",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7",
+    "usb": "^2.17.0",
+    "vite": "^6.0",
+    "vitest": "^4.1.1"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.7.3"
+  }
+}
