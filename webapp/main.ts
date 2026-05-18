@@ -6,9 +6,9 @@ import {
   parseResponse,
   type IpOctets,
   type DeviceInfo,
-} from 'portacount-webusb';
-import createLwipModule from 'portacount-webusb/wasm';
-import wasmUrl from 'portacount-webusb/wasm/lwip.wasm?url';
+} from 'webusb-portacount';
+import createLwipModule from 'webusb-portacount/wasm';
+import wasmUrl from 'webusb-portacount/wasm/lwip.wasm?url';
 import { openSessionStore, type SampleRecord, type SessionStore } from './session-store';
 import { SessionPanel, type ActiveCardHandle } from './session-panel';
 

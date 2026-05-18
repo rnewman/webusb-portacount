@@ -16,7 +16,7 @@
  * the same millisecond).
  */
 
-const DB_NAME = 'portacount-webusb';
+const DB_NAME = 'webusb-portacount';
 const DB_VERSION = 1;
 const STORE_SESSIONS = 'sessions';
 const STORE_SAMPLES = 'samples';

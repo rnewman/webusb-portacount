@@ -81,7 +81,7 @@ export type LwipModuleOverrides = Partial<LwipModule> & {
 };
 
 /**
- * The default export of `portacount-webusb/wasm` — the Emscripten ES6
+ * The default export of `webusb-portacount/wasm` — the Emscripten ES6
  * module factory. Consumers pass this straight into {@link LwipStack.create}.
  */
 export type LwipModuleFactory = (overrides?: LwipModuleOverrides) => Promise<LwipModule>;
@@ -105,8 +105,8 @@ export interface LwipStackOptions {
    * hashed or moved away from its sibling .wasm. In Vite:
    *
    * ```ts
-   * import createLwipModule from 'portacount-webusb/wasm';
-   * import wasmUrl from 'portacount-webusb/wasm/lwip.wasm?url';
+   * import createLwipModule from 'webusb-portacount/wasm';
+   * import wasmUrl from 'webusb-portacount/wasm/lwip.wasm?url';
    * const stack = await LwipStack.create(createLwipModule, mac, onFrame, { wasmUrl });
    * ```
    *
@@ -153,7 +153,7 @@ export class LwipStack {
    * Load and initialize the lwIP Wasm module.
    *
    * @param createModule  The Emscripten factory — `default` export of
-   *   `portacount-webusb/wasm`. Static-import it in the consumer so the
+   *   `webusb-portacount/wasm`. Static-import it in the consumer so the
    *   bundler can analyze the dependency graph.
    */
   static async create(

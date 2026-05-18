@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copy build/lwip.js + build/lwip.wasm into dist/wasm/ and emit a
 // hand-rolled type declaration so consumers can do:
-//   import createLwipModule from 'portacount-webusb/wasm';
+//   import createLwipModule from 'webusb-portacount/wasm';
 
 import { copyFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

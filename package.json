@@ -1,5 +1,5 @@
 {
-  "name": "portacount-webusb",
+  "name": "webusb-portacount",
   "version": "0.2.0",
   "description": "WebUSB connectivity for the PortaCount Pro 8030 — RNDIS wire layer, lwIP-in-Wasm TCP/IP stack, and XML-over-TCP protocol client.",
   "author": "Richard Newman <rnewman@twinql.com>",

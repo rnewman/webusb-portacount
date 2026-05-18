@@ -8,7 +8,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "portacount-webusb": "file:.."
+    "webusb-portacount": "file:.."
   },
   "devDependencies": {
     "vite": "^6.0"
