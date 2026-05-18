@@ -1,0 +1,16 @@
+{
+  "name": "portacount-webapp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "portacount-webusb": "file:.."
+  },
+  "devDependencies": {
+    "vite": "^6.0"
+  }
+}

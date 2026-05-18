@@ -1,6 +1,6 @@
 {
   "name": "portacount-webusb",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "WebUSB connectivity for the PortaCount Pro 8030 — RNDIS wire layer, lwIP-in-Wasm TCP/IP stack, and XML-over-TCP protocol client.",
   "author": "Richard Newman <rnewman@twinql.com>",
   "license": "MPL-2.0",
@@ -14,21 +14,51 @@
   "homepage": "https://github.com/rnewman/webusb-portacount#readme",
   "private": false,
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/lwip.d.ts",
+      "import": "./dist/wasm/lwip.js"
+    },
+    "./wasm/lwip.wasm": "./dist/wasm/lwip.wasm",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "workspaces": [
+    "webapp"
+  ],
   "scripts": {
     "build:wasm": "./scripts/build-wasm.sh",
-    "dev": "vite",
-    "build": "npm run build:wasm && vite build",
+    "build:lib": "tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs",
+    "build:webapp": "npm run build --workspace webapp",
+    "build": "npm run build:wasm && npm run build:lib && npm run build:webapp",
+    "dev": "npm run dev --workspace webapp",
+    "prewatch": "node scripts/copy-wasm.mjs",
+    "watch": "concurrently -k -n tsc,vite --prefix-colors=cyan,magenta \"tsc -p tsconfig.build.json --watch --preserveWatchOutput\" \"npm run dev --workspace webapp\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "probe": "tsx scripts/probe-portacount.ts",
     "probe:tcp": "tsx scripts/probe-tcp.ts",
     "probe:listen": "tsx scripts/probe-listen.ts",
     "probe:handshake": "tsx scripts/probe-handshake.ts",
-    "dump:pcap": "tsx scripts/dump-pcap.ts"
+    "dump:pcap": "tsx scripts/dump-pcap.ts",
+    "prepack": "node scripts/check-wasm.mjs && npm run build:lib"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "@types/w3c-web-usb": "^1.0.14",
+    "concurrently": "^9.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.7",
     "usb": "^2.17.0",

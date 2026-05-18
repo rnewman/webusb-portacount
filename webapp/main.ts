@@ -1,6 +1,14 @@
-import { LwipStack, type IpOctets } from '@/lwip-wasm';
-import { RndisWireLayer } from '@/rndis';
-import { Cmd, type DeviceInfo, Portacount, parseResponse } from '@/portacount';
+import {
+  LwipStack,
+  RndisWireLayer,
+  Cmd,
+  Portacount,
+  parseResponse,
+  type IpOctets,
+  type DeviceInfo,
+} from 'portacount-webusb';
+import createLwipModule from 'portacount-webusb/wasm';
+import wasmUrl from 'portacount-webusb/wasm/lwip.wasm?url';
 import { openSessionStore, type SampleRecord, type SessionStore } from './session-store';
 import { SessionPanel, type ActiveCardHandle } from './session-panel';
 
@@ -200,7 +208,7 @@ async function connect(): Promise<void> {
 
   setStatus('dhcp-status', 'pending', 'Waiting for lease…');
   const stack = await LwipStack.create(
-    '/wasm/lwip.js',
+    createLwipModule,
     wire.macAddress,
     (frame) => {
       wire.sendFrame(frame).catch((e) => log(`sendFrame: ${(e as Error).message}`));
@@ -208,6 +216,7 @@ async function connect(): Promise<void> {
     {
       addressing: 'dhcp',
       netmask: [255, 255, 0, 0],
+      wasmUrl,
       onIpStatus: (ip, gateway, netmask) => {
         log(`netif: ip=${ip} gw=${gateway} mask=${netmask}`);
       },

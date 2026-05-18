@@ -71,6 +71,21 @@ export interface ServerHandlers {
   onClosed?: (connId: number) => void;
 }
 
+/**
+ * Overrides accepted by the Emscripten-generated factory. The library
+ * mostly populates `_on*` callbacks, but consumers may also need
+ * `locateFile` to redirect the .wasm fetch in bundled environments.
+ */
+export type LwipModuleOverrides = Partial<LwipModule> & {
+  locateFile?: (path: string, scriptDirectory: string) => string;
+};
+
+/**
+ * The default export of `portacount-webusb/wasm` — the Emscripten ES6
+ * module factory. Consumers pass this straight into {@link LwipStack.create}.
+ */
+export type LwipModuleFactory = (overrides?: LwipModuleOverrides) => Promise<LwipModule>;
+
 export interface LwipStackOptions {
   /**
    * How to acquire an address. Defaults to 'static' if `ip` is provided
@@ -84,9 +99,22 @@ export interface LwipStackOptions {
   netmask?: IpOctets;
   /** Fires when the netif IP changes (e.g. DHCP/AutoIP completes). */
   onIpStatus?: (ip: string, gateway: string, netmask: string) => void;
+  /**
+   * URL where `lwip.wasm` can be fetched. Required in bundled
+   * environments (Vite, webpack, esbuild) where the .js module is
+   * hashed or moved away from its sibling .wasm. In Vite:
+   *
+   * ```ts
+   * import createLwipModule from 'portacount-webusb/wasm';
+   * import wasmUrl from 'portacount-webusb/wasm/lwip.wasm?url';
+   * const stack = await LwipStack.create(createLwipModule, mac, onFrame, { wasmUrl });
+   * ```
+   *
+   * In Node ESM with no bundler, omit — Emscripten resolves the .wasm
+   * relative to the .js via `import.meta.url`.
+   */
+  wasmUrl?: string;
 }
-
-type CreateLwipModule = (overrides?: Partial<LwipModule>) => Promise<LwipModule>;
 
 function formatIp(ipU32: number): string {
   return `${ipU32 & 0xff}.${(ipU32 >> 8) & 0xff}.${(ipU32 >> 16) & 0xff}.${(ipU32 >> 24) & 0xff}`;
@@ -123,21 +151,21 @@ export class LwipStack {
 
   /**
    * Load and initialize the lwIP Wasm module.
+   *
+   * @param createModule  The Emscripten factory — `default` export of
+   *   `portacount-webusb/wasm`. Static-import it in the consumer so the
+   *   bundler can analyze the dependency graph.
    */
   static async create(
-    wasmUrl: string,
+    createModule: LwipModuleFactory,
     mac: Uint8Array,
     onOutputFrame: (frame: Uint8Array) => void,
     options?: LwipStackOptions,
   ): Promise<LwipStack> {
-    const { default: createModule }: { default: CreateLwipModule } = await import(
-      /* @vite-ignore */ wasmUrl
-    );
-
     let mod: LwipModule;
     let stackRef: LwipStack;
 
-    const module = await createModule({
+    const overrides: LwipModuleOverrides = {
       _onOutputFrame: (dataPtr: number, len: number) => {
         const frame = new Uint8Array(mod.HEAPU8.buffer, dataPtr, len).slice();
         onOutputFrame(frame);
@@ -165,7 +193,14 @@ export class LwipStack {
       _onServerClosed: (connId: number) => {
         stackRef.serverHandlers.onClosed?.(connId);
       },
-    });
+    };
+
+    if (options?.wasmUrl) {
+      const wasmUrl = options.wasmUrl;
+      overrides.locateFile = (path) => (path.endsWith('.wasm') ? wasmUrl : path);
+    }
+
+    const module = await createModule(overrides);
     mod = module;
 
     // Write MAC into the inject buffer (reused temporarily)

@@ -25,7 +25,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { RndisWireLayer } from '../src/rndis';
-import { LwipStack, type IpOctets } from '../src/lwip-wasm';
+import { LwipStack, type IpOctets, type LwipModuleFactory } from '../src/lwip-wasm';
 import { Cmd, Portacount, parseResponse } from '../src/portacount';
 import { openPcapWriter } from './lib/pcap';
 
@@ -121,8 +121,12 @@ async function main(): Promise<void> {
   log(`RNDIS up. host MAC: ${[...ourMac].map((b) => b.toString(16).padStart(2, '0')).join(':')}`);
 
   // ---- lwIP ----
+  const factoryUrl = pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href;
+  const { default: createLwipModule } = (await import(factoryUrl)) as {
+    default: LwipModuleFactory;
+  };
   const stack = await LwipStack.create(
-    pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href,
+    createLwipModule,
     ourMac,
     (frame) => {
       pcap.write(frame);

@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { LwipStack } from '../src/lwip-wasm';
+import { LwipStack, type LwipModuleFactory } from '../src/lwip-wasm';
 import { VirtualWire } from '../src/virtual-wire';
-import { fileURLToPath } from 'url';
-import path from 'path';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const wasmUrl = path.resolve(__dirname, '../build/lwip.js');
+const wasmJsUrl = pathToFileURL(path.resolve(__dirname, '../build/lwip.js')).href;
+const { default: createLwipModule } = (await import(wasmJsUrl)) as { default: LwipModuleFactory };
 
 const MAC_A = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
 const MAC_B = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00, 0x02]);
@@ -47,7 +49,7 @@ describe('TCP echo test via virtual wire', () => {
 
     // Create Stack B (echo server)
     const stackB = await LwipStack.create(
-      wasmUrl,
+      createLwipModule,
       MAC_B,
       wire.handleFrameFromB,
       { ip: IP_B, netmask: NETMASK },
@@ -57,7 +59,7 @@ describe('TCP echo test via virtual wire', () => {
 
     // Create Stack A (client)
     const stackA = await LwipStack.create(
-      wasmUrl,
+      createLwipModule,
       MAC_A,
       wire.handleFrameFromA,
       {

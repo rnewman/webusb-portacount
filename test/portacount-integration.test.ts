@@ -10,15 +10,16 @@
 
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { LwipStack, type IpOctets } from '../src/lwip-wasm';
+import { LwipStack, type IpOctets, type LwipModuleFactory } from '../src/lwip-wasm';
 import { VirtualWire } from '../src/virtual-wire';
 import { Cmd, Portacount } from '../src/portacount';
 import { DEFAULT_FIXTURE, FakePortacount, type DeviceFixture } from './fake-portacount';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const wasmUrl = path.resolve(__dirname, '../build/lwip.js');
+const wasmJsUrl = pathToFileURL(path.resolve(__dirname, '../build/lwip.js')).href;
+const { default: createLwipModule } = (await import(wasmJsUrl)) as { default: LwipModuleFactory };
 
 const HOST_MAC = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]);
 const DEVICE_MAC = new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x00, 0x02]);
@@ -29,14 +30,14 @@ const NETMASK: IpOctets = [255, 255, 0, 0];
 async function setupWiredStacks(fixture: DeviceFixture = DEFAULT_FIXTURE) {
   const wire = new VirtualWire();
   const deviceStack = await LwipStack.create(
-    wasmUrl, DEVICE_MAC, wire.handleFrameFromB,
+    createLwipModule, DEVICE_MAC, wire.handleFrameFromB,
     { ip: DEVICE_IP, netmask: NETMASK },
   );
   wire.setStackB(deviceStack);
   const fake = new FakePortacount(deviceStack, fixture);
 
   const hostStack = await LwipStack.create(
-    wasmUrl, HOST_MAC, wire.handleFrameFromA,
+    createLwipModule, HOST_MAC, wire.handleFrameFromA,
     { ip: HOST_IP, netmask: NETMASK },
   );
   wire.setStackA(hostStack);

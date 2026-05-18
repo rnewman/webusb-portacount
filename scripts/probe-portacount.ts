@@ -17,7 +17,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { RndisWireLayer } from '../src/rndis';
-import { LwipStack } from '../src/lwip-wasm';
+import { LwipStack, type LwipModuleFactory } from '../src/lwip-wasm';
 
 const PCAP_LINKTYPE_ETHERNET = 1;
 const SNAPLEN = 65535;
@@ -182,10 +182,13 @@ async function main() {
   // it via gratuitous ARP. That's the simplest way to get the device to reply:
   // it'll see broadcast ARPs and (if our random IP collides with its own) it'll
   // ARP-reply, revealing its MAC and IP.
-  const wasmUrl = pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href;
-  log(`loading lwIP from ${wasmUrl}`);
+  const factoryUrl = pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href;
+  log(`loading lwIP from ${factoryUrl}`);
+  const { default: createLwipModule } = (await import(factoryUrl)) as {
+    default: LwipModuleFactory;
+  };
   const stack = await LwipStack.create(
-    wasmUrl,
+    createLwipModule,
     wire.macAddress,
     (frame) => {
       txCount++;

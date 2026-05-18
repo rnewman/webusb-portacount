@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { RndisWireLayer } from '../src/rndis';
-import { LwipStack, type IpOctets } from '../src/lwip-wasm';
+import { LwipStack, type IpOctets, type LwipModuleFactory } from '../src/lwip-wasm';
 import { openPcapWriter } from './lib/pcap';
 
 const DEVICE_IP: IpOctets = [169, 254, 207, 137];
@@ -136,8 +136,12 @@ async function main(): Promise<void> {
     wasResolve();
   };
 
+  const factoryUrl = pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href;
+  const { default: createLwipModule } = (await import(factoryUrl)) as {
+    default: LwipModuleFactory;
+  };
   const stack = await LwipStack.create(
-    pathToFileURL(resolve(process.cwd(), 'build/lwip.js')).href,
+    createLwipModule,
     wire.macAddress,
     (frame) => {
       pcap.write(frame);
