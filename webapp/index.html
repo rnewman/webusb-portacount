@@ -3,67 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Portacount 8030 — WebUSB</title>
+  <title>Portacount 8030 fit test</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
-    <h1>Portacount 8030 — WebUSB</h1>
+    <h1>Portacount 8030 fit test</h1>
+
+    <section id="connection-pill" class="conn-pill disconnected">
+      <div class="conn-row">
+        <div class="conn-status">
+          <span class="conn-dot"></span>
+          <span class="conn-title">Connection</span>
+          <span class="conn-summary" id="conn-summary">Not connected</span>
+        </div>
+        <div class="conn-actions">
+          <button id="connect-btn">Connect</button>
+          <button id="disconnect-btn" disabled>Disconnect</button>
+        </div>
+      </div>
+      <details class="conn-details" id="conn-details">
+        <summary>Details</summary>
+        <div class="conn-detail-grid">
+          <div class="conn-detail-col">
+            <h3>Stack</h3>
+            <div id="usb-status" class="status-item pending"><span class="label">USB / RNDIS</span><span class="value">Idle</span></div>
+            <div id="dhcp-status" class="status-item pending"><span class="label">DHCP</span><span class="value">Idle</span></div>
+            <div id="runtime-status" class="status-item pending"><span class="label">Runtime (3602)</span><span class="value">Idle</span></div>
+            <div id="handshake-status" class="status-item pending"><span class="label">Handshake (3603)</span><span class="value">Idle</span></div>
+          </div>
+          <div class="conn-detail-col">
+            <h3>Device</h3>
+            <div class="status-item"><span class="label">Serial</span><span class="value" id="sn-val">—</span></div>
+            <div class="status-item"><span class="label">Model</span><span class="value" id="model-val">—</span></div>
+            <div class="status-item"><span class="label">Build</span><span class="value" id="build-val">—</span></div>
+          </div>
+        </div>
+      </details>
+    </section>
 
     <div class="cols">
       <div class="left-col">
-        <section id="connect-section">
-          <button id="connect-btn">Connect Portacount</button>
-          <button id="disconnect-btn" disabled>Disconnect</button>
-        </section>
-
-        <section id="status">
-          <h2>Stack</h2>
-          <div id="usb-status" class="status-item pending">
-            <span class="label">USB / RNDIS</span><span class="value">Idle</span>
-          </div>
-          <div id="dhcp-status" class="status-item pending">
-            <span class="label">DHCP</span><span class="value">Idle</span>
-          </div>
-          <div id="runtime-status" class="status-item pending">
-            <span class="label">Runtime probe (3602)</span><span class="value">Idle</span>
-          </div>
-          <div id="handshake-status" class="status-item pending">
-            <span class="label">XML handshake (3603)</span><span class="value">Idle</span>
-          </div>
-        </section>
-
-        <section id="identity">
-          <h2>Device</h2>
-          <div class="status-item"><span class="label">Serial number</span><span class="value" id="sn-val">—</span></div>
-          <div class="status-item"><span class="label">Model number</span><span class="value" id="model-val">—</span></div>
-          <div class="status-item"><span class="label">Build string</span><span class="value" id="build-val">—</span></div>
-        </section>
-
-        <section id="sampling">
-          <h2>Sampling</h2>
-          <button id="start-btn" disabled>Start sampling</button>
-          <button id="stop-btn" disabled>Stop sampling</button>
-          <div class="status-item" style="margin-top: 0.75rem;">
-            <span class="label">Status</span><span class="value" id="rt-status">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Ambient concentration</span><span class="value" id="rt-amb">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Mask concentration</span><span class="value" id="rt-mask">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Fit factor</span><span class="value" id="rt-ff">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Message</span><span class="value" id="rt-msg">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Low-alcohol warning</span><span class="value" id="rt-low">—</span>
-          </div>
-        </section>
-
         <section id="log">
           <h2>
             Event log
@@ -77,9 +57,83 @@
       </div>
 
       <div class="right-col">
-        <section id="session-history">
+        <div class="tabs" role="tablist">
+          <button class="tab active" role="tab" data-tab="testruns" aria-selected="true">Test Runs</button>
+          <button class="tab" role="tab" data-tab="sampling" aria-selected="false">Sampling</button>
+        </div>
+
+        <section class="tab-panel active" data-tab-panel="sampling">
+          <div id="sampling-controls" class="sampling-controls">
+            <div class="sampling-actions">
+              <button id="start-btn" disabled>Start sampling</button>
+              <button id="stop-btn" disabled>Stop sampling</button>
+            </div>
+            <div class="sampling-readings">
+              <div class="status-item"><span class="label">Status</span><span class="value" id="rt-status">—</span></div>
+              <div class="status-item"><span class="label">Ambient</span><span class="value" id="rt-amb">—</span></div>
+              <div class="status-item"><span class="label">Mask</span><span class="value" id="rt-mask">—</span></div>
+              <div class="status-item"><span class="label">Fit factor</span><span class="value" id="rt-ff">—</span></div>
+              <div class="status-item"><span class="label">Message</span><span class="value" id="rt-msg">—</span></div>
+              <div class="status-item"><span class="label">Low alcohol</span><span class="value" id="rt-low">—</span></div>
+            </div>
+          </div>
           <h2>Sessions</h2>
           <div id="session-list"></div>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="testruns" hidden>
+          <div id="fittest-form" class="fittest-form">
+            <div class="row primary">
+              <label for="ft-name">Name</label>
+              <input id="ft-name" type="text" placeholder="John Doe">
+            </div>
+            <div class="row primary">
+              <label for="ft-mask-model">Mask</label>
+              <input id="ft-mask-model" type="text" placeholder="3M 8511">
+            </div>
+            <details id="fittest-settings" class="fittest-settings">
+              <summary>
+                <span class="ft-summary-label">More settings</span>
+                <span class="ft-summary-protocol" data-current-protocol></span>
+                <span class="ft-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="ft-more-grid">
+                <div class="row">
+                  <label for="ft-protocol">Protocol</label>
+                  <select id="ft-protocol"></select>
+                </div>
+                <div class="row">
+                  <label for="ft-idnumber">ID number</label>
+                  <input id="ft-idnumber" type="text" placeholder="optional">
+                </div>
+                <div class="row two-col">
+                  <div><label for="ft-mask-size">Mask size</label><input id="ft-mask-size" type="text" placeholder="M" value="M"></div>
+                  <div><label for="ft-mask-passlevel">Pass level</label><input id="ft-mask-passlevel" type="number" value="100" min="1" max="64000"></div>
+                </div>
+                <div class="row">
+                  <label class="checkbox-row"><input id="ft-mask-n95" type="checkbox"> N95 (8038 only)</label>
+                </div>
+                <div class="row">
+                  <label for="ft-operator">Operator</label>
+                  <input id="ft-operator" type="text" value="webapp">
+                </div>
+                <div class="row">
+                  <label for="ft-notes">Notes</label>
+                  <textarea id="ft-notes" rows="2" placeholder="optional"></textarea>
+                </div>
+                <div class="row">
+                  <label class="checkbox-row"><input id="ft-end-on-unachievable" type="checkbox"> Abort if overall FF becomes unachievable</label>
+                </div>
+              </div>
+            </details>
+          </div>
+          <div class="testrun-actions">
+            <button id="ft-start-btn" disabled>Start fit test</button>
+            <button id="ft-abort-btn" disabled>Abort</button>
+          </div>
+          <div id="fittest-panel-host"></div>
+          <h2>Tests</h2>
+          <div id="fittest-list"></div>
         </section>
       </div>
     </div>

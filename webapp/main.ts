@@ -11,6 +11,9 @@ import createLwipModule from 'webusb-portacount/wasm';
 import wasmUrl from 'webusb-portacount/wasm/lwip.wasm?url';
 import { openSessionStore, type SampleRecord, type SessionStore } from './session-store';
 import { SessionPanel, type ActiveCardHandle } from './session-panel';
+import { openFitTestStore, type FitTestStore } from './fittest-store';
+import { FitTestUi } from './fittest-ui';
+import { FitTestHistoryPanel } from './fittest-history-panel';
 
 const DHCP_TIMEOUT_MS = 15000;
 const POLL_INTERVAL_MS = 1000;
@@ -22,6 +25,34 @@ const startBtn = el<HTMLButtonElement>('start-btn');
 const stopBtn = el<HTMLButtonElement>('stop-btn');
 const xmlTraceToggle = el<HTMLInputElement>('xml-trace-toggle');
 const sessionListEl = el<HTMLDivElement>('session-list');
+const connPill = el<HTMLElement>('connection-pill');
+const connSummary = el<HTMLElement>('conn-summary');
+const connDetails = el<HTMLDetailsElement>('conn-details');
+
+// Tab switching — two tabs share the right column; flipping is just a
+// CSS class + `hidden` attribute swap.
+for (const tabBtn of document.querySelectorAll<HTMLButtonElement>('.tab')) {
+  tabBtn.addEventListener('click', () => {
+    const which = tabBtn.dataset.tab;
+    if (!which) return;
+    for (const b of document.querySelectorAll<HTMLButtonElement>('.tab')) {
+      const on = b.dataset.tab === which;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    }
+    for (const p of document.querySelectorAll<HTMLElement>('.tab-panel')) {
+      const on = p.dataset.tabPanel === which;
+      p.classList.toggle('active', on);
+      p.hidden = !on;
+    }
+  });
+}
+
+function setConnState(state: 'disconnected' | 'connecting' | 'connected', summary: string): void {
+  connPill.classList.remove('disconnected', 'connecting', 'connected');
+  connPill.classList.add(state);
+  connSummary.textContent = summary;
+}
 
 interface Session {
   wire: RndisWireLayer;
@@ -40,6 +71,9 @@ interface Session {
 let session: Session | null = null;
 let sessionStore: SessionStore | null = null;
 let sessionPanel: SessionPanel | null = null;
+let fittestStore: FitTestStore | null = null;
+let fittestUi: FitTestUi | null = null;
+let fittestHistory: FitTestHistoryPanel | null = null;
 
 // Open IndexedDB and populate the panel from history. Only publish
 // `sessionPanel` after `reloadFromStore` completes — otherwise a fast
@@ -53,6 +87,39 @@ void (async () => {
     sessionPanel = panel;
   } catch (err) {
     log(`session store init failed: ${(err as Error).message}`);
+  }
+})();
+
+// Initialize the fit-test UI. Construct it eagerly so DOM bindings settle
+// before the user can possibly click; wire the store in once it opens.
+void (async () => {
+  const tabRootEl = document.querySelector<HTMLElement>('[data-tab-panel="testruns"]');
+  const panelHostEl = document.getElementById('fittest-panel-host');
+  if (!tabRootEl || !panelHostEl) return;
+  fittestUi = new FitTestUi(tabRootEl, panelHostEl as HTMLElement, {
+    log,
+    onTestStarted: () => {
+      // Disable the realtime sampling buttons while a fit test runs;
+      // the device can't serve both flows simultaneously.
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+    },
+    onTestEnded: () => {
+      if (session && !session.active) startBtn.disabled = false;
+    },
+  });
+  try {
+    fittestStore = await openFitTestStore();
+    fittestUi.setStore(fittestStore);
+    const listEl = document.getElementById('fittest-list');
+    if (listEl) {
+      const hist = new FitTestHistoryPanel(listEl as HTMLElement, fittestStore);
+      await hist.reloadFromStore();
+      fittestHistory = hist;
+      fittestUi.setHistoryPanel(hist);
+    }
+  } catch (err) {
+    log(`fittest store init failed: ${(err as Error).message}`);
   }
 })();
 
@@ -156,6 +223,7 @@ connectBtn.addEventListener('click', () => {
     log(`FATAL: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);
     connectBtn.disabled = false;
+    setConnState('disconnected', 'Not connected');
   });
 });
 
@@ -198,6 +266,7 @@ async function connect(): Promise<void> {
     throw new Error('WebUSB not available — use a Chromium-based browser over HTTPS or localhost.');
   }
 
+  setConnState('connecting', 'Requesting device…');
   setStatus('usb-status', 'pending', 'Requesting device…');
   const device = await navigator.usb.requestDevice({ filters: [RndisWireLayer.USB_FILTER] });
   log(`device: ${device.manufacturerName} / ${device.productName} serial=${device.serialNumber}`);
@@ -262,6 +331,11 @@ async function connect(): Promise<void> {
   session = { wire, stack, pc, pollHandle: null, deviceInfo: info, active: null };
   disconnectBtn.disabled = false;
   startBtn.disabled = false;
+  setConnState('connected', `SN ${info.serialNumber} · ${info.modelNumber}`);
+  // Auto-collapse the details once we're up — the user doesn't need to
+  // stare at the stack rundown during normal operation.
+  connDetails.open = false;
+  fittestUi?.setPortacount(pc, info);
 
   // One status snapshot immediately so the panel isn't empty.
   await pollRealtimeOnce(session);
@@ -384,6 +458,7 @@ async function pollRealtimeOnce(s: Session): Promise<void> {
 async function disconnect(): Promise<void> {
   const s = session;
   session = null;
+  fittestUi?.setPortacount(null, null);
   if (!s) return;
   if (s.pollHandle !== null) clearInterval(s.pollHandle);
   setSamplingDirty(false);
@@ -409,6 +484,7 @@ async function disconnect(): Promise<void> {
   setText('build-val', '—');
   for (const id of ['rt-status', 'rt-amb', 'rt-mask', 'rt-ff', 'rt-msg', 'rt-low']) setText(id, '—');
   connectBtn.disabled = false;
+  setConnState('disconnected', 'Not connected');
   log('disconnected.');
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "webusb-portacount",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "WebUSB connectivity for the PortaCount Pro 8030 — RNDIS wire layer, lwIP-in-Wasm TCP/IP stack, and XML-over-TCP protocol client.",
   "author": "Richard Newman <rnewman@twinql.com>",
   "license": "MPL-2.0",
@@ -52,6 +52,7 @@
     "probe:tcp": "tsx scripts/probe-tcp.ts",
     "probe:listen": "tsx scripts/probe-listen.ts",
     "probe:handshake": "tsx scripts/probe-handshake.ts",
+    "probe:fittest": "tsx scripts/probe-fittest.ts",
     "dump:pcap": "tsx scripts/dump-pcap.ts",
     "prepack": "node scripts/check-wasm.mjs && npm run build:lib"
   },

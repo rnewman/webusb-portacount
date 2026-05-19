@@ -72,6 +72,10 @@ export class FakePortacount {
   private lockState: 'UNLOCK' | 'REMOTE' = 'UNLOCK';
   /** Commands seen this session, for assertions in tests. */
   readonly received: string[] = [];
+  /** Scripted FITTEST/ALL responses, popped per poll. */
+  private fittestPollReplies: string[] = [];
+  /** Default reply when the scripted queue is empty. */
+  private fittestIdleReply: string | null = null;
 
   constructor(stack: LwipStack, fixture: DeviceFixture = DEFAULT_FIXTURE) {
     this.stack = stack;
@@ -88,6 +92,31 @@ export class FakePortacount {
   /** Force the lock state — useful for testing the LOCK-already-REMOTE branch. */
   setLockState(state: 'UNLOCK' | 'REMOTE'): void {
     this.lockState = state;
+  }
+
+  /**
+   * Queue a sequence of canned FITTEST/ALL responses. Each FITTEST/ALL
+   * the host polls pops the next entry; when the queue empties, the
+   * device replies with `idleReply` (defaults to a DONE/IDLE snapshot).
+   *
+   * The strings are returned exactly as given (the framing terminator
+   * is appended by the transport).
+   */
+  scriptFitTest(snapshots: string[], idleReply?: string): void {
+    this.fittestPollReplies = [...snapshots];
+    this.fittestIdleReply = idleReply ?? this.defaultIdleFittestReply();
+  }
+
+  private defaultIdleFittestReply(): string {
+    return [
+      '<MAIN><FITTEST>',
+      '<STATUS>IDLE</STATUS>',
+      '<DONE>true</DONE>',
+      '<ERROR></ERROR>',
+      '<FF_OVERALL></FF_OVERALL>',
+      '<FF_OVERALL_STATUS></FF_OVERALL_STATUS>',
+      '</FITTEST></MAIN>',
+    ].join('');
   }
 
   private onAccept(connId: number, port: number): void {
@@ -192,6 +221,40 @@ export class FakePortacount {
 
     if (xml.includes('<REALTIME><STOP/>')) {
       return '<MAIN><REALTIME><STOP>OK</STOP></REALTIME></MAIN>';
+    }
+
+    // ---- 8030 fit-test surface ----
+
+    if (xml.includes('<NEW_TEMP_DATABASE/>')) {
+      return '<MAIN><DATABASE><NEW_TEMP_DATABASE>OK</NEW_TEMP_DATABASE></DATABASE></MAIN>';
+    }
+
+    if (xml.includes('<PEOPLE Command="WRITE">')) {
+      return '<MAIN><DATABASE><PEOPLE><PEOPLEID>1</PEOPLEID></PEOPLE></DATABASE></MAIN>';
+    }
+
+    if (xml.includes('<RESPIRATOR Command="WRITE">')) {
+      return '<MAIN><DATABASE><RESPIRATOR><RESPIRATORID>1</RESPIRATORID></RESPIRATOR></DATABASE></MAIN>';
+    }
+
+    if (xml.includes('<PROTOCOL Command="WRITE">')) {
+      return '<MAIN><DATABASE><PROTOCOL><PROTOCOLID>1</PROTOCOLID></PROTOCOL></DATABASE></MAIN>';
+    }
+
+    if (xml.includes('<FITTEST>') && xml.includes('<START/>')) {
+      // Atomic FITTEST/START write.
+      return '<MAIN><FITTEST>OK</FITTEST></MAIN>';
+    }
+
+    if (xml.includes('<FITTEST><STOP/>')) {
+      return '<MAIN><FITTEST><STOP>OK</STOP></FITTEST></MAIN>';
+    }
+
+    if (xml.includes('<FITTEST><ALL/>')) {
+      const next = this.fittestPollReplies.shift();
+      if (next !== undefined) return next;
+      if (this.fittestIdleReply !== null) return this.fittestIdleReply;
+      return this.defaultIdleFittestReply();
     }
 
     // Unknown command — reply with an error frame so the test can see it.

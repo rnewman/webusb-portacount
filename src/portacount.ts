@@ -58,6 +58,18 @@ const utf8 = new TextEncoder();
  * tests want '0' to stay '0', not become 0 or false). All keys are
  * optional — the device only includes the tags relevant to the command.
  */
+/** One per-exercise block within a FITTEST/ALL response. The position
+ * comes through under the `INDEX` key (the device wraps each per-exercise
+ * block under its own `<INDEX>n</INDEX>` element). */
+export interface FittestIndexRaw {
+  INDEX?: string;
+  NAME?: string;
+  FITFACTOR?: string;
+  STATUS?: string;
+  EXCLUDE?: string;
+  [tag: string]: unknown;
+}
+
 export interface ParsedResponse {
   MAIN?: {
     SYSTEM?: {
@@ -80,7 +92,30 @@ export interface ParsedResponse {
       LOW_ALCOHOL_WARNING?: string;
       [tag: string]: string | undefined;
     };
-    FITTEST?: Record<string, string | undefined>;
+    FITTEST?: {
+      NEWDATA?: string;
+      MSG_MAIN?: string;
+      FF_OVERALL?: string;
+      FF_OVERALL_STATUS?: string;
+      STATUS?: string;
+      DONE?: string;
+      ERROR?: string;
+      PROGRESS_PERCENT?: string;
+      EXERCISE_NUMBER?: string;
+      FF_PASSLEVEL?: string;
+      AMB_CONC?: string;
+      AMB_CONC_STATUS?: string;
+      MASK_CONC?: string;
+      MASK_CONC_STATUS?: string;
+      SECONDS?: string;
+      TOTAL_SECONDS?: string;
+      LOW_ALCOHOL_WARNING?: string;
+      LOW_PARTICLE_WARNING?: string;
+      /** Per-exercise blocks; fast-xml-parser returns one as an object,
+       * multiple as an array. The runner normalizes this. */
+      INDEX?: FittestIndexRaw | FittestIndexRaw[];
+      [tag: string]: unknown;
+    };
     DAILYCHECK?: Record<string, string | undefined>;
     MEASUREMENT?: Record<string, string | undefined>;
     DATABASE?: Record<string, string | undefined>;
