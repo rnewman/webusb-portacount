@@ -165,6 +165,10 @@ export interface FitTestRunnerCallbacks {
     mask: number;
     ambStatus?: 'PASS' | 'FAIL' | 'TESTING';
     maskStatus?: 'PASS' | 'FAIL' | 'TESTING';
+    /** 0-based exercise the device says is currently running. */
+    exerciseNumber?: number;
+    /** Phase string the device emits — e.g. AMBIENT_SAMPLE, MASK_SAMPLE. */
+    phase?: string;
   }) => void;
   /** Fired once per exercise when it transitions to a terminal status. */
   onExerciseCompleted?: (result: ExerciseResult) => void;

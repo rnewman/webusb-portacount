@@ -280,6 +280,38 @@ describe('FitTestRunner: happy path', () => {
     expect(completed[0]).toMatchObject({ index: 0, name: 'A', status: 'PASS', fitFactor: 100 });
   });
 
+  it('preserves per-exercise PASS/FAIL even when the DONE snapshot clears INDEX blocks', async () => {
+    // Real-device behavior: the 8030 transitions to IDLE / DONE and at
+    // that point the FITTEST/ALL snapshot no longer carries per-exercise
+    // INDEX blocks. The runner must remember the terminal per-exercise
+    // states observed in earlier polls.
+    const stub = new StubPortacount();
+    stub.pollResponses = [
+      fittestResponse({ status: 'MASK_SAMPLE', exerciseNumber: 0, blocks: [
+        { index: 0, name: 'Normal Breathing', status: 'PASS', ff: 120 },
+        { index: 1, name: 'Deep Breathing', status: 'TESTING' },
+      ]}),
+      fittestResponse({ status: 'MASK_SAMPLE', exerciseNumber: 1, blocks: [
+        { index: 0, name: 'Normal Breathing', status: 'PASS', ff: 120 },
+        { index: 1, name: 'Deep Breathing', status: 'PASS', ff: 145 },
+      ]}),
+      // Final poll: device drops all per-exercise data.
+      fittestResponse({ status: 'IDLE', done: true, ffOverall: 131, ffOverallStatus: 'PASS' }),
+    ];
+    const runner = new FitTestRunner(stub.asPortacount());
+    const p = runner.run({
+      person: STOCK_PERSON, mask: STOCK_MASK, protocol: STOCK_PROTOCOL,
+      start: STOCK_START, deviceModel: '8030',
+    });
+    await vi.runAllTimersAsync();
+    const result = await p;
+    expect(result.exercises).toEqual([
+      { index: 0, name: 'Normal Breathing', status: 'PASS', fitFactor: 120 },
+      { index: 1, name: 'Deep Breathing', status: 'PASS', fitFactor: 145 },
+    ]);
+    expect(result.ffOverall).toBe(131);
+  });
+
   it('forwards live AMB/MASK samples to onSample only while TESTING', async () => {
     const stub = new StubPortacount();
     stub.pollResponses = [

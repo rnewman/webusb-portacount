@@ -51,6 +51,10 @@ export interface FitTestSampleRecord {
   mask: number;
   ambStatus?: 'PASS' | 'FAIL' | 'TESTING';
   maskStatus?: 'PASS' | 'FAIL' | 'TESTING';
+  /** 0-based exercise the device was running when this sample landed. */
+  exerciseNumber?: number;
+  /** Device phase, e.g. AMBIENT_SAMPLE, MASK_SAMPLE. */
+  phase?: string;
 }
 
 export interface FitTestStore {

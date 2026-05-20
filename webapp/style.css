@@ -379,6 +379,21 @@ main {
   color: #f59e0b;
 }
 
+.fittest-card .ftc-overall .ftc-hm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: #fbbf24;
+  opacity: 0.85;
+}
+
+.fittest-card .ftc-tooltip .tt-ff {
+  color: #fbbf24;
+  display: inline-block;
+  min-width: 2.5em;
+}
+
 .fittest-card .ftc-stats {
   font-size: 0.75rem;
   color: #888;

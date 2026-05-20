@@ -48,6 +48,7 @@ export class FitTestUi {
   private personName: HTMLInputElement;
   private personId: HTMLInputElement;
   private maskModel: HTMLInputElement;
+  private maskType: HTMLSelectElement;
   private maskSize: HTMLInputElement;
   private maskPassLevel: HTMLInputElement;
   private maskN95: HTMLInputElement;
@@ -73,6 +74,7 @@ export class FitTestUi {
     this.personName = required<HTMLInputElement>(tabRoot, '#ft-name');
     this.personId = required<HTMLInputElement>(tabRoot, '#ft-idnumber');
     this.maskModel = required<HTMLInputElement>(tabRoot, '#ft-mask-model');
+    this.maskType = required<HTMLSelectElement>(tabRoot, '#ft-mask-type');
     this.maskSize = required<HTMLInputElement>(tabRoot, '#ft-mask-size');
     this.maskPassLevel = required<HTMLInputElement>(tabRoot, '#ft-mask-passlevel');
     this.maskN95 = required<HTMLInputElement>(tabRoot, '#ft-mask-n95');
@@ -87,6 +89,16 @@ export class FitTestUi {
     });
     this.abortBtn.addEventListener('click', () => {
       void this.abortTest();
+    });
+
+    // Mask-type dropdown drives the pass-level field. Pass level is a
+    // property of the mask *class* per OSHA (half-mask 100, full-face
+    // 500, etc.); the N95 checkbox is orthogonal (it's a device-side
+    // measurement flag for N95 filter material). "custom" is the
+    // escape hatch — leaves the current value alone.
+    this.maskType.addEventListener('change', () => {
+      const pl = passLevelForMaskType(this.maskType.value);
+      if (pl !== null) this.maskPassLevel.value = String(pl);
     });
     // Form starts editable so users can pre-fill name/mask before plugging
     // the device in. The Start button is the only thing that gates on the
@@ -131,7 +143,7 @@ export class FitTestUi {
   private setFormEnabled(enabled: boolean): void {
     for (const el of [
       this.protocolSelect, this.personName, this.personId,
-      this.maskModel, this.maskSize, this.maskPassLevel, this.maskN95,
+      this.maskModel, this.maskType, this.maskSize, this.maskPassLevel, this.maskN95,
       this.operator, this.notes, this.endOnUnachievable,
     ]) {
       el.disabled = !enabled;
@@ -240,6 +252,8 @@ export class FitTestUi {
           mask: s.mask,
           ambStatus: s.ambStatus,
           maskStatus: s.maskStatus,
+          exerciseNumber: s.exerciseNumber,
+          phase: s.phase,
         };
         // Live-paint the placeholder card so the chart fills in as the
         // test runs — matches the sampling UI's behavior.
@@ -299,6 +313,20 @@ export class FitTestUi {
     } catch (err) {
       this.cb.log(`fit test abort: ${(err as Error).message}`);
     }
+  }
+}
+
+/** Map a mask-type dropdown value to the OSHA-standard FF threshold for
+ *  that mask class. Returns null for "custom" so the caller leaves the
+ *  current pass-level value alone. */
+function passLevelForMaskType(value: string): number | null {
+  switch (value) {
+    case 'half': return 100;
+    case 'full': return 500;
+    case 'papr-tight': return 500;
+    case 'papr-loose': return 25;
+    case 'custom': return null;
+    default: return null;
   }
 }
 

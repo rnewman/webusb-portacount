@@ -62,7 +62,7 @@
           <button class="tab" role="tab" data-tab="sampling" aria-selected="false">Sampling</button>
         </div>
 
-        <section class="tab-panel active" data-tab-panel="sampling">
+        <section class="tab-panel" data-tab-panel="sampling" hidden>
           <div id="sampling-controls" class="sampling-controls">
             <div class="sampling-actions">
               <button id="start-btn" disabled>Start sampling</button>
@@ -81,7 +81,7 @@
           <div id="session-list"></div>
         </section>
 
-        <section class="tab-panel" data-tab-panel="testruns" hidden>
+        <section class="tab-panel active" data-tab-panel="testruns">
           <div id="fittest-form" class="fittest-form">
             <div class="row primary">
               <label for="ft-name">Name</label>
@@ -106,12 +106,22 @@
                   <label for="ft-idnumber">ID number</label>
                   <input id="ft-idnumber" type="text" placeholder="optional">
                 </div>
+                <div class="row">
+                  <label for="ft-mask-type">Mask type</label>
+                  <select id="ft-mask-type">
+                    <option value="half" selected>Half-mask APR (pass 100)</option>
+                    <option value="full">Full-face APR (pass 500)</option>
+                    <option value="papr-tight">Tight-fit PAPR / hood / SCBA (pass 500)</option>
+                    <option value="papr-loose">Loose-fit PAPR (pass 25)</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
                 <div class="row two-col">
                   <div><label for="ft-mask-size">Mask size</label><input id="ft-mask-size" type="text" placeholder="M" value="M"></div>
                   <div><label for="ft-mask-passlevel">Pass level</label><input id="ft-mask-passlevel" type="number" value="100" min="1" max="64000"></div>
                 </div>
                 <div class="row">
-                  <label class="checkbox-row"><input id="ft-mask-n95" type="checkbox"> N95 (8038 only)</label>
+                  <label class="checkbox-row"><input id="ft-mask-n95" type="checkbox"> N95 mode (device measurement adjustment; 8038 / 8030+N95-Companion only)</label>
                 </div>
                 <div class="row">
                   <label for="ft-operator">Operator</label>

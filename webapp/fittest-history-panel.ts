@@ -37,9 +37,116 @@ const PLOT_H = CHART_H - PAD_T - PAD_B;
 
 const COLOR_AMB = '#00d4ff';
 const COLOR_MASK = '#4ade80';
+const COLOR_FF = '#fbbf24';
 const COLOR_GRID = '#2a2a3e';
 const COLOR_AXIS_LABEL = '#888';
 const COLOR_CROSSHAIR = '#666';
+
+/** Instantaneous fit factor for one poll. Defined only when both amb
+ *  and mask carry usable counts; mask near zero would give a runaway
+ *  ratio and is treated as "no datum yet". */
+function sampleFF(s: FitTestSampleRecord): number | null {
+  if (!Number.isFinite(s.amb) || !Number.isFinite(s.mask)) return null;
+  if (s.amb <= 0 || s.mask <= 0) return null;
+  return s.amb / s.mask;
+}
+
+/** OSHA harmonic mean over non-excluded exercise FFs. Returns null
+ *  unless all included exercises have a numeric FF — partial means
+ *  are misleading. */
+function harmonicMeanFF(exercises: ResolvedExercise[]): number | null {
+  const included = exercises.filter((e) => e.status !== 'EXCLUDED');
+  if (included.length === 0) return null;
+  let sumRecip = 0;
+  for (const e of included) {
+    if (e.fitFactor === null || !Number.isFinite(e.fitFactor) || e.fitFactor <= 0) {
+      return null;
+    }
+    sumRecip += 1 / e.fitFactor;
+  }
+  return included.length / sumRecip;
+}
+
+interface ResolvedExercise {
+  index: number;
+  name: string;
+  fitFactor: number | null;
+  status: 'PASS' | 'FAIL' | 'EXCLUDED' | 'NOT_STARTED';
+  /** Where the FF came from: the device's per-exercise report, or
+   *  computed by the host from the sample stream. */
+  source: 'device' | 'computed' | 'none';
+}
+
+/** Merge device-reported per-exercise results with host-computed ones.
+ *  Per-exercise FF is computed from samples as a fallback when the
+ *  device didn't report (the 8030 has been observed to omit INDEX
+ *  blocks entirely on some runs). The protocol drives the row set —
+ *  one resolved row per protocol exercise. */
+function resolveExercises(
+  t: FitTestRecord,
+  samples: FitTestSampleRecord[],
+): ResolvedExercise[] {
+  const deviceById = new Map<number, ExerciseResult>();
+  for (const e of t.result?.exercises ?? []) deviceById.set(e.index, e);
+
+  const avgAmb = mean(
+    samples
+      .filter((s) => (s.phase === 'AMBIENT_SAMPLE' || s.ambStatus === 'TESTING') && s.amb > 0)
+      .map((s) => s.amb),
+  );
+
+  const out: ResolvedExercise[] = [];
+  const protocolExercises = t.protocol.exercises ?? [];
+  for (let i = 0; i < protocolExercises.length; i++) {
+    const pe = protocolExercises[i];
+    const dev = deviceById.get(i);
+    if (dev) {
+      out.push({
+        index: i,
+        name: dev.name || pe.name,
+        fitFactor: dev.fitFactor,
+        status: dev.status,
+        source: 'device',
+      });
+      continue;
+    }
+    // Host-computed fallback. We use mask samples tagged with this
+    // exercise number; phase is preferred but tolerated as absent for
+    // older sample records (pre-exerciseNumber instrumentation).
+    const maskVals = samples
+      .filter((s) =>
+        s.exerciseNumber === i &&
+        (s.phase === undefined || s.phase === 'MASK_SAMPLE' || s.maskStatus === 'TESTING') &&
+        s.mask > 0,
+      )
+      .map((s) => s.mask);
+    const avgMask = mean(maskVals);
+    let ff: number | null = null;
+    if (avgAmb !== null && avgMask !== null && avgMask > 0) {
+      ff = avgAmb / avgMask;
+    }
+    const status: ResolvedExercise['status'] = pe.excluded
+      ? 'EXCLUDED'
+      : ff === null
+        ? 'NOT_STARTED'
+        : ff >= t.mask.passLevel ? 'PASS' : 'FAIL';
+    out.push({
+      index: i,
+      name: pe.name,
+      fitFactor: ff,
+      status,
+      source: ff === null ? 'none' : 'computed',
+    });
+  }
+  return out;
+}
+
+function mean(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  let s = 0;
+  for (const x of xs) s += x;
+  return s / xs.length;
+}
 
 export interface ActiveFitTestHandle {
   /** Append a sample to the live placeholder card and re-paint its chart. */
@@ -99,11 +206,16 @@ export class FitTestHistoryPanel {
     card.className = 'fittest-card';
     card.dataset.testId = String(t.startedAt);
 
-    const title = personLabel(t.person) || '(unlabeled)';
+    const personPart = personLabel(t.person) || '(unlabeled)';
+    const title = `${personPart} · ${t.mask.model}`;
     const result = t.result;
     const ff = result?.ffOverall ?? null;
     const status = result?.ffOverallStatus;
-    const stats = computeStats(result?.exercises ?? [], samples);
+    const resolved = resolveExercises(t, samples);
+    const hmFF = harmonicMeanFF(resolved);
+    const hmStatus: 'PASS' | 'FAIL' | undefined =
+      hmFF !== null ? (hmFF >= t.mask.passLevel ? 'PASS' : 'FAIL') : undefined;
+    const stats = computeStats(resolved, samples);
 
     const header = document.createElement('header');
     header.innerHTML = `
@@ -114,6 +226,12 @@ export class FitTestHistoryPanel {
       <div class="ftc-overall">
         <span class="ff">${ff !== null ? ff.toFixed(1) : '—'}</span>
         <span class="pill ${pillClass(status, t.aborted)}">${pillLabel(status, t.aborted)}</span>
+        ${hmFF !== null ? `
+          <span class="ftc-hm" title="Harmonic mean of non-excluded per-exercise FFs, compared against pass level ${t.mask.passLevel} (host-computed)">
+            HM ${hmFF.toFixed(1)}
+            <span class="pill ${pillClass(hmStatus, undefined)}">${pillLabel(hmStatus, undefined)}</span>
+          </span>
+        ` : ''}
       </div>
     `;
     card.appendChild(header);
@@ -139,17 +257,21 @@ export class FitTestHistoryPanel {
     card.appendChild(chartWrap);
     paintFittestChart(card, samples);
 
-    if (result?.exercises?.length) {
+    if (resolved.length) {
       const exList = document.createElement('div');
       exList.className = 'ftc-exlist';
-      for (const r of result.exercises) {
+      for (const r of resolved) {
         const row = document.createElement('div');
         row.className = 'fittest-exrow';
         const name = document.createElement('span');
         name.textContent = `${r.index + 1}. ${r.name || '(unnamed)'}`;
         const ffEl = document.createElement('span');
         ffEl.className = 'ff';
-        ffEl.textContent = r.fitFactor !== null ? r.fitFactor.toFixed(1) : '—';
+        const ffStr = r.fitFactor !== null ? r.fitFactor.toFixed(1) : '—';
+        ffEl.textContent = r.source === 'computed' ? `${ffStr}*` : ffStr;
+        if (r.source === 'computed') {
+          ffEl.title = 'Computed from samples — device did not report this exercise';
+        }
         const pill = document.createElement('span');
         pill.className = `pill ${exPillClass(r.status)}`;
         pill.textContent = r.status;
@@ -202,7 +324,8 @@ export class FitTestHistoryPanel {
         // consistent without a full reload.
         if (patch.person) t.person = { ...t.person, ...patch.person };
         if (patch.mask) t.mask = { ...t.mask, ...patch.mask };
-        const newTitle = personLabel(t.person) || '(unlabeled)';
+        const newPerson = personLabel(t.person) || '(unlabeled)';
+        const newTitle = `${newPerson} · ${t.mask.model}`;
         const titleEl = header.querySelector('.ftc-title');
         if (titleEl) titleEl.textContent = newTitle;
         savedNote.style.display = '';
@@ -291,7 +414,7 @@ function exPillClass(s: string): string {
   }
 }
 
-function computeStats(exercises: ExerciseResult[], samples: FitTestSampleRecord[]): string {
+function computeStats(exercises: ResolvedExercise[], samples: FitTestSampleRecord[]): string {
   const parts: string[] = [];
   const ffs = exercises.map((e) => e.fitFactor).filter((v): v is number => v !== null);
   if (ffs.length) {
@@ -326,23 +449,41 @@ function buildCsv(t: FitTestRecord, samples: FitTestSampleRecord[]): string {
   lines.push(`# device,${csvField(t.deviceSn)},${csvField(t.deviceModel)},${csvField(t.deviceBuild)}`);
   lines.push(`# protocol,${csvField(protocolName(t.protocol))}`);
   const r = t.result;
+  const resolved = resolveExercises(t, samples);
   if (r) {
     lines.push(`# overallFF,${r.ffOverall ?? ''},${r.ffOverallStatus}`);
   }
+  const hm = harmonicMeanFF(resolved);
+  if (hm !== null) {
+    const hmPass = hm >= t.mask.passLevel ? 'PASS' : 'FAIL';
+    lines.push(`# overallFF_harmonicMean,${hm.toFixed(2)},${hmPass}`);
+  }
   lines.push('');
-  lines.push('exerciseIndex,name,fitFactor,status');
-  for (const ex of r?.exercises ?? []) {
+  // source = device | computed | none. "computed" rows are filled in
+  // from the sample stream (avg ambient / avg mask) when the device
+  // didn't report a FITFACTOR for that exercise.
+  lines.push('exerciseIndex,name,fitFactor,status,source');
+  for (const ex of resolved) {
     lines.push([
       String(ex.index),
       csvField(ex.name),
       ex.fitFactor !== null ? ex.fitFactor.toFixed(2) : '',
       ex.status,
+      ex.source,
     ].join(','));
   }
   lines.push('');
-  lines.push('t_ms,ambient,mask,ambStatus,maskStatus');
+  lines.push('t_ms,exerciseIndex,phase,ambient,mask,fitFactor,ambStatus,maskStatus');
   for (const s of samples) {
-    lines.push([s.t, s.amb, s.mask, s.ambStatus, s.maskStatus].map(csvField).join(','));
+    const ff = sampleFF(s);
+    lines.push([
+      s.t,
+      s.exerciseNumber !== undefined ? s.exerciseNumber : '',
+      s.phase ?? '',
+      s.amb, s.mask,
+      ff !== null ? ff.toFixed(2) : '',
+      s.ambStatus, s.maskStatus,
+    ].map(csvField).join(','));
   }
   return lines.join('\n');
 }
@@ -457,7 +598,8 @@ function buildChartSvg(t: FitTestRecord, samples: FitTestSampleRecord[]): SVGSVG
   }
 
   const tMax = Math.max(samples[samples.length - 1].t, 1);
-  const concMax = Math.max(1, ...samples.map((s) => Math.max(s.amb, s.mask)));
+  const ffVals = samples.map(sampleFF).filter((v): v is number => v !== null);
+  const concMax = Math.max(1, ...samples.map((s) => Math.max(s.amb, s.mask)), ...ffVals);
   const concDom: [number, number] = [1, Math.pow(10, Math.ceil(Math.log10(concMax)))];
   const xOf = (ms: number) => PAD_L + (ms / tMax) * PW;
   const yOf = (v: number) => {
@@ -504,6 +646,35 @@ function buildChartSvg(t: FitTestRecord, samples: FitTestSampleRecord[]): SVGSVG
   maskLine.setAttribute('stroke-width', '1.5');
   maskLine.setAttribute('points', samples.map((s) => `${xOf(s.t)},${yOf(Math.max(1, s.mask))}`).join(' '));
   svg.appendChild(maskLine);
+  for (const seg of splitSegments(samples, sampleFF)) {
+    const ffLine = document.createElementNS(NS, 'polyline');
+    ffLine.setAttribute('fill', 'none');
+    ffLine.setAttribute('stroke', '#fbbf24');
+    ffLine.setAttribute('stroke-width', '1.5');
+    ffLine.setAttribute('stroke-dasharray', '4 3');
+    ffLine.setAttribute('points', seg.map((p) => `${xOf(p.t)},${yOf(Math.max(1, p.v))}`).join(' '));
+    svg.appendChild(ffLine);
+  }
+
+  // exercise boundary marks
+  for (const b of exerciseBoundaries(samples)) {
+    const x = xOf(b.tMs);
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', String(x));
+    line.setAttribute('y1', String(PAD_T));
+    line.setAttribute('x2', String(x));
+    line.setAttribute('y2', String(PAD_T + PH));
+    line.setAttribute('stroke', '#525273');
+    svg.appendChild(line);
+    const lab = document.createElementNS(NS, 'text');
+    lab.setAttribute('x', String(x + 2));
+    lab.setAttribute('y', String(PAD_T + 10));
+    lab.setAttribute('fill', '#8a8aa8');
+    lab.setAttribute('font-family', 'monospace');
+    lab.setAttribute('font-size', '10');
+    lab.textContent = `ex ${b.exerciseNumber + 1}`;
+    svg.appendChild(lab);
+  }
 
   // x ticks
   const ticks = 5;
@@ -525,7 +696,7 @@ function buildChartSvg(t: FitTestRecord, samples: FitTestSampleRecord[]): SVGSVG
   // legend
   const legend = document.createElementNS(NS, 'g');
   legend.setAttribute('transform', `translate(${PAD_L + 8}, ${PAD_T + 14})`);
-  const items: Array<[string, string]> = [['#00d4ff', 'ambient'], ['#4ade80', 'mask']];
+  const items: Array<[string, string]> = [['#00d4ff', 'ambient'], ['#4ade80', 'mask'], ['#fbbf24', 'FF']];
   items.forEach(([col, lab], i) => {
     const dot = document.createElementNS(NS, 'rect');
     dot.setAttribute('x', String(i * 80));
@@ -590,7 +761,8 @@ function paintFittestChart(card: HTMLElement, samples: FitTestSampleRecord[]): v
   const tMaxMs = Math.max(samples[samples.length - 1].t, 1);
   const xOf = (tMs: number) => PAD_L + (tMs / tMaxMs) * PLOT_W;
 
-  const concMax = Math.max(1, ...samples.map((s) => Math.max(s.amb, s.mask)));
+  const ffVals = samples.map(sampleFF).filter((v): v is number => v !== null);
+  const concMax = Math.max(1, ...samples.map((s) => Math.max(s.amb, s.mask)), ...ffVals);
   const concDomain: [number, number] = [1, niceCeilingPow10(concMax)];
   const yOf = (v: number) => {
     const clamped = Math.max(concDomain[0], v);
@@ -619,9 +791,25 @@ function paintFittestChart(card: HTMLElement, samples: FitTestSampleRecord[]): v
   }
   svg.appendChild(chartLine(PAD_L, PAD_T + PLOT_H, PAD_L + PLOT_W, PAD_T + PLOT_H, COLOR_GRID, 1));
 
+  // exercise boundary marks — vertical lines where exerciseNumber
+  // changes, with a small label above each segment.
+  const boundaries = exerciseBoundaries(samples);
+  for (const b of boundaries) {
+    const x = xOf(b.tMs);
+    svg.appendChild(chartLine(x, PAD_T, x, PAD_T + PLOT_H, '#525273', 1));
+    const lab = chartText(x + 2, PAD_T + 8, `ex ${b.exerciseNumber + 1}`, '#8a8aa8');
+    lab.setAttribute('text-anchor', 'start');
+    svg.appendChild(lab);
+  }
+
   // data
   svg.appendChild(chartPolyline(samples, (s) => [xOf(s.t), yOf(Math.max(1, s.amb))], COLOR_AMB));
   svg.appendChild(chartPolyline(samples, (s) => [xOf(s.t), yOf(Math.max(1, s.mask))], COLOR_MASK));
+  // FF as a separate set of polyline segments split on nulls — drawn
+  // as dashed so it reads as derived, not a raw measurement.
+  for (const seg of splitSegments(samples, sampleFF)) {
+    svg.appendChild(chartDashedPolyline(seg, (p) => [xOf(p.t), yOf(Math.max(1, p.v))], COLOR_FF));
+  }
 
   // crosshair (populated by hover handler)
   const cross = document.createElementNS(SVG_NS, 'g');
@@ -629,6 +817,7 @@ function paintFittestChart(card: HTMLElement, samples: FitTestSampleRecord[]): v
   cross.appendChild(chartLine(0, PAD_T, 0, PAD_T + PLOT_H, COLOR_CROSSHAIR, 1));
   cross.appendChild(chartDot(0, 0, COLOR_AMB));
   cross.appendChild(chartDot(0, 0, COLOR_MASK));
+  cross.appendChild(chartDot(0, 0, COLOR_FF));
   svg.appendChild(cross);
 
   const overlay = document.createElementNS(SVG_NS, 'rect');
@@ -655,6 +844,66 @@ function chartPolyline(
   el.setAttribute('stroke-linejoin', 'round');
   el.setAttribute('points', samples.map((s) => project(s).join(',')).join(' '));
   return el;
+}
+
+function chartDashedPolyline(
+  pts: Array<{ t: number; v: number }>,
+  project: (p: { t: number; v: number }) => [number, number],
+  stroke: string,
+): SVGPolylineElement {
+  const el = document.createElementNS(SVG_NS, 'polyline');
+  el.setAttribute('fill', 'none');
+  el.setAttribute('stroke', stroke);
+  el.setAttribute('stroke-width', '1.5');
+  el.setAttribute('stroke-linejoin', 'round');
+  el.setAttribute('stroke-dasharray', '4 3');
+  el.setAttribute('points', pts.map((p) => project(p).join(',')).join(' '));
+  return el;
+}
+
+/** First sample time where exerciseNumber transitions to a new value.
+ *  Skips the leading exercise (it starts at t=0 and doesn't need a mark). */
+function exerciseBoundaries(
+  samples: FitTestSampleRecord[],
+): Array<{ tMs: number; exerciseNumber: number }> {
+  const out: Array<{ tMs: number; exerciseNumber: number }> = [];
+  let last: number | undefined;
+  for (const s of samples) {
+    const n = s.exerciseNumber;
+    if (n === undefined) continue;
+    if (last === undefined) {
+      last = n;
+      continue;
+    }
+    if (n !== last) {
+      out.push({ tMs: s.t, exerciseNumber: n });
+      last = n;
+    }
+  }
+  return out;
+}
+
+/** Walk samples and project to {t,v} points, breaking the line on null
+ *  values so gaps (mask not yet sampled) don't draw spurious segments. */
+function splitSegments(
+  samples: FitTestSampleRecord[],
+  project: (s: FitTestSampleRecord) => number | null,
+): Array<Array<{ t: number; v: number }>> {
+  const segments: Array<Array<{ t: number; v: number }>> = [];
+  let current: Array<{ t: number; v: number }> = [];
+  for (const s of samples) {
+    const v = project(s);
+    if (v === null) {
+      if (current.length > 0) {
+        segments.push(current);
+        current = [];
+      }
+    } else {
+      current.push({ t: s.t, v });
+    }
+  }
+  if (current.length > 0) segments.push(current);
+  return segments;
 }
 
 function chartLine(x1: number, y1: number, x2: number, y2: number, stroke: string, w: number): SVGLineElement {
@@ -733,12 +982,21 @@ function attachHover(
     dots[0].setAttribute('cy', String(yOf(Math.max(1, s.amb))));
     dots[1].setAttribute('cx', String(sx));
     dots[1].setAttribute('cy', String(yOf(Math.max(1, s.mask))));
+    const ff = sampleFF(s);
+    if (ff !== null) {
+      dots[2].setAttribute('cx', String(sx));
+      dots[2].setAttribute('cy', String(yOf(Math.max(1, ff))));
+      dots[2].setAttribute('style', '');
+    } else {
+      dots[2].setAttribute('style', 'display:none');
+    }
     cross.setAttribute('style', 'display:inline');
 
     tooltip.innerHTML =
       `<div><span class="tt-t">t=${(s.t / 1000).toFixed(1)}s</span></div>` +
       `<div><span class="tt-amb">amb</span> ${formatConcExact(s.amb)}</div>` +
-      `<div><span class="tt-mask">mask</span> ${formatConcExact(s.mask)}</div>`;
+      `<div><span class="tt-mask">mask</span> ${formatConcExact(s.mask)}</div>` +
+      `<div><span class="tt-ff">FF</span> ${ff !== null ? formatConcExact(ff) : '—'}</div>`;
     tooltip.style.display = 'block';
     const px = ev.clientX - rect.left;
     const py = ev.clientY - rect.top;

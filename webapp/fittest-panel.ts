@@ -82,11 +82,16 @@ export class FitTestPanel {
     setPillForStatus(this.els.ambPill, status.ambConcStatus);
     this.els.maskVal.textContent = formatConc(status.maskConc);
     setPillForStatus(this.els.maskPill, status.maskConcStatus);
-    if (status.ffOverall !== null) {
+    // Device FF_OVERALL is 0 until the test ends and the device computes
+    // its final value; in the meantime, show a running harmonic mean of
+    // the per-exercise FFs we've seen so far. Once the device reports
+    // FF_OVERALL_STATUS (PASS/FAIL), trust the device value.
+    if (status.ffOverallStatus !== undefined && status.ffOverall !== null) {
       this.els.overall.textContent = status.ffOverall.toFixed(1);
       setPillForStatus(this.els.overallPill, status.ffOverallStatus);
     } else {
-      this.els.overall.textContent = '—';
+      const running = runningHarmonicMean(status.exercises);
+      this.els.overall.textContent = running !== null ? running.toFixed(1) : '—';
       setPillForStatus(this.els.overallPill, undefined);
     }
     if (status.error) {
@@ -252,6 +257,21 @@ function setPillForExercise(el: HTMLElement, status: ExerciseStatus): void {
     case 'EXCLUDED': el.classList.add('excluded'); el.textContent = 'EXCLUDED'; break;
     default: el.classList.add('not-started'); el.textContent = '—'; break;
   }
+}
+
+/** Running harmonic mean of the per-exercise FFs in terminal status,
+ *  excluding EXCLUDED slots. Returns null if no exercise has finished
+ *  yet. Used as a live preview of overall FF while the device hasn't
+ *  finalized FF_OVERALL. */
+function runningHarmonicMean(exercises: ExerciseSnapshot[]): number | null {
+  const terminal = exercises.filter(
+    (e) => (e.status === 'PASS' || e.status === 'FAIL')
+      && e.fitFactor !== null && Number.isFinite(e.fitFactor) && e.fitFactor > 0,
+  );
+  if (terminal.length === 0) return null;
+  let sumRecip = 0;
+  for (const e of terminal) sumRecip += 1 / (e.fitFactor as number);
+  return terminal.length / sumRecip;
 }
 
 function formatConc(n: number): string {

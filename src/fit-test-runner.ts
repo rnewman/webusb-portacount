@@ -29,6 +29,8 @@ import {
 } from './fit-test-protocol';
 import type {
   ExerciseResult,
+  ExerciseSnapshot,
+  ExerciseStatus,
   FitTestAbortReason,
   FitTestMask,
   FitTestPerson,
@@ -66,6 +68,11 @@ export class FitTestRunner {
   private prevStatus: FitTestStatus | null = null;
   private runStartedAt = 0;
   private hasSeenNonIdle = false;
+  /** Highest-fidelity per-exercise snapshot seen across all polls, keyed
+   * by index. The device has been observed to clear INDEX blocks when it
+   * transitions to IDLE/DONE, so the last poll alone cannot be trusted to
+   * carry the terminal per-exercise state; we accumulate here. */
+  private bestExercises: Map<number, ExerciseSnapshot> = new Map();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private pollInFlight = false;
   private postAbortDeadline = 0;
@@ -171,10 +178,50 @@ export class FitTestRunner {
     this.finalizeError = null;
     this.resolveRun = null;
     this.rejectRun = null;
+    this.bestExercises.clear();
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+  }
+
+  /** Update the per-exercise accumulator with a new snapshot. Promotes
+   *  NOT_STARTED → TESTING → terminal (PASS/FAIL/EXCLUDED). Terminal
+   *  states are sticky — never downgrade. Empty `name` from a follow-up
+   *  poll never erases a previously known name. */
+  private mergeExerciseSnapshot(s: ExerciseSnapshot): void {
+    const cur = this.bestExercises.get(s.index);
+    if (!cur) {
+      // First time we've seen this index. Drop pure NOT_STARTED placeholders
+      // — they carry no signal and would clutter the final result.
+      if (s.status === 'NOT_STARTED' && s.name === '' && s.fitFactor === null) {
+        return;
+      }
+      this.bestExercises.set(s.index, { ...s });
+      return;
+    }
+    // Don't let a NOT_STARTED downgrade an already-known exercise.
+    if (s.status === 'NOT_STARTED' && cur.status !== 'NOT_STARTED') {
+      // Preserve the latest non-empty name / fitFactor if the device
+      // does send one alongside the cleared status.
+      if (s.name !== '') cur.name = s.name;
+      if (s.fitFactor !== null) cur.fitFactor = s.fitFactor;
+      return;
+    }
+    // Don't downgrade terminal → testing.
+    if (isTerminal(cur.status) && !isTerminal(s.status)) {
+      if (s.name !== '' && cur.name === '') cur.name = s.name;
+      return;
+    }
+    // Otherwise replace, but never overwrite a known name with an empty one.
+    const merged: ExerciseSnapshot = {
+      index: s.index,
+      name: s.name !== '' ? s.name : cur.name,
+      fitFactor: s.fitFactor !== null ? s.fitFactor : cur.fitFactor,
+      status: s.status,
+      excluded: s.excluded,
+    };
+    this.bestExercises.set(s.index, merged);
   }
 
   private async driveRun(args: FitTestRunArgs): Promise<void> {
@@ -266,7 +313,21 @@ export class FitTestRunner {
       return;
     }
 
-    this.callbacks.onStatusUpdate?.(next);
+    // Accumulate per-exercise state before notifying consumers. The
+    // device drops INDEX blocks at IDLE/DONE (and intermittently during
+    // some phases), so the raw poll's exercises[] is unreliable. The
+    // accumulator carries the highest-fidelity per-exercise state we've
+    // seen so far. We pass the augmented snapshot to onStatusUpdate so
+    // the live panel sees the accumulated exercises, not a transient
+    // empty view.
+    for (const ex of next.exercises) {
+      this.mergeExerciseSnapshot(ex);
+    }
+    const augmentedExercises = next.exercises.map(
+      (ex) => this.bestExercises.get(ex.index) ?? ex,
+    );
+    const augmented: FitTestStatus = { ...next, exercises: augmentedExercises };
+    this.callbacks.onStatusUpdate?.(augmented);
 
     // Live sample stream.
     if (next.ambConcStatus === 'TESTING' || next.maskConcStatus === 'TESTING') {
@@ -276,6 +337,8 @@ export class FitTestRunner {
         mask: next.maskConc,
         ambStatus: next.ambConcStatus,
         maskStatus: next.maskConcStatus,
+        exerciseNumber: next.exerciseNumber,
+        phase: next.status,
       });
     }
 
@@ -313,9 +376,13 @@ export class FitTestRunner {
       this.pollTimer = null;
     }
 
-    // Build the result.
-    const exerciseResults: ExerciseResult[] = last.exercises
-      .filter((e) => e.status === 'PASS' || e.status === 'FAIL' || e.status === 'EXCLUDED')
+    // Build the result from the accumulator. The final poll's exercises
+    // may be all-NOT_STARTED on DONE; mergeExerciseSnapshot has been
+    // tracking the highest-fidelity state across the whole run.
+    const accumulated = Array.from(this.bestExercises.values())
+      .sort((a, b) => a.index - b.index);
+    const exerciseResults: ExerciseResult[] = accumulated
+      .filter((e) => isTerminal(e.status))
       .map((e) => ({
         index: e.index,
         name: e.name,
@@ -386,6 +453,10 @@ class FitTestAbortedSentinel extends Error {
     this.name = 'FitTestAbortedSentinel';
     this.reason = reason;
   }
+}
+
+function isTerminal(s: ExerciseStatus): boolean {
+  return s === 'PASS' || s === 'FAIL' || s === 'EXCLUDED';
 }
 
 function describeReason(r: FitTestAbortReason): string {
