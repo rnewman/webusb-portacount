@@ -251,14 +251,14 @@ export class FitTestHistoryPanel {
         <div class="ftc-time">${formatStartTime(t.startedAt)} · ${escapeHtml(protocolName(t.protocol))}</div>
       </div>
       <div class="ftc-overall">
-        <span class="ftc-mean device" title="Overall FF as reported by the PortaCount (native).">
-          <span class="label">device</span>
+        <span class="ftc-mean device" title="Overall FF as reported by the PortaCount (native; geometric mean).">
+          <span class="label">device (GM)</span>
           <span class="ff">${ff !== null ? ff.toFixed(1) : '—'}</span>
           <span class="pill ${pillClass(status, t.aborted)}">${pillLabel(status, t.aborted)}</span>
         </span>
         ${hmFF !== null ? `
           <span class="ftc-mean hm" title="Harmonic mean of per-exercise FFs — required by OSHA 29 CFR 1910.134 Appendix A. Pass level ${passLevel}.">
-            <span class="label">HM · OSHA</span>
+            <span class="label">OSHA (HM)</span>
             <span class="ff">${hmFF.toFixed(1)}</span>
             <span class="pill ${pillClass(hmStatus, undefined)}">${pillLabel(hmStatus, undefined)}</span>
           </span>
@@ -267,11 +267,6 @@ export class FitTestHistoryPanel {
     `;
     card.appendChild(header);
 
-    const statsEl = document.createElement('div');
-    statsEl.className = 'ftc-stats';
-    statsEl.textContent = stats;
-    card.appendChild(statsEl);
-
     // Inline AMB/MASK chart — same shape as the sampling cards, just
     // without the FF axis (FF lives on per-exercise rows, not samples).
     // Tucked into a details expando so the card stays compact; click to
@@ -279,8 +274,14 @@ export class FitTestHistoryPanel {
     // we re-paint when the details opens.
     const chartDetails = document.createElement('details');
     chartDetails.className = 'ftc-chart-details';
+
+    const statsEl = document.createElement('div');
+    statsEl.className = 'ftc-stats';
+    statsEl.textContent = stats;
+    chartDetails.appendChild(statsEl);
+
     const chartSummary = document.createElement('summary');
-    chartSummary.textContent = 'Chart (ambient / mask / FF over time)';
+    chartSummary.textContent = 'Details & chart';
     const chartWrap = document.createElement('div');
     chartWrap.className = 'ftc-svg-wrap';
     const chartSvg = document.createElementNS(SVG_NS, 'svg');
