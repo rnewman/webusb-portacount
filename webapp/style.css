@@ -398,8 +398,7 @@ main {
   color: #f59e0b;
 }
 
-.fittest-card .ftc-overall .ftc-mean.hm .ff,
-.fittest-card .ftc-overall .ftc-mean.gm .ff {
+.fittest-card .ftc-overall .ftc-mean.hm .ff {
   color: #fbbf24;
   font-size: 0.9rem;
 }

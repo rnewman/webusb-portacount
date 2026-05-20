@@ -55,35 +55,16 @@ function sampleFF(s: FitTestSampleRecord): number | null {
  *  per-exercise FFs. Returns null unless all included exercises have a
  *  numeric FF — partial means are misleading. */
 function harmonicMeanFF(exercises: ResolvedExercise[]): number | null {
-  const ffs = includedFFs(exercises);
-  if (ffs === null) return null;
-  let sumRecip = 0;
-  for (const f of ffs) sumRecip += 1 / f;
-  return ffs.length / sumRecip;
-}
-
-/** Geometric mean of non-excluded per-exercise FFs. Matches the
- *  PortaCount 8030/8038 firmware's native overall-FF computation;
- *  empirically the device's `<FF_OVERALL>` tracks GM within ~0.2%. */
-function geometricMeanFF(exercises: ResolvedExercise[]): number | null {
-  const ffs = includedFFs(exercises);
-  if (ffs === null) return null;
-  let sumLog = 0;
-  for (const f of ffs) sumLog += Math.log(f);
-  return Math.exp(sumLog / ffs.length);
-}
-
-function includedFFs(exercises: ResolvedExercise[]): number[] | null {
   const included = exercises.filter((e) => e.status !== 'EXCLUDED');
   if (included.length === 0) return null;
-  const out: number[] = [];
+  let sumRecip = 0;
   for (const e of included) {
     if (e.fitFactor === null || !Number.isFinite(e.fitFactor) || e.fitFactor <= 0) {
       return null;
     }
-    out.push(e.fitFactor);
+    sumRecip += 1 / e.fitFactor;
   }
-  return out;
+  return included.length / sumRecip;
 }
 
 interface ResolvedExercise {
@@ -258,12 +239,9 @@ export class FitTestHistoryPanel {
     const status = result?.ffOverallStatus;
     const resolved = resolveExercises(t, samples);
     const hmFF = harmonicMeanFF(resolved);
-    const gmFF = geometricMeanFF(resolved);
     const passLevel = t.mask.passLevel;
-    const meanStatus = (v: number | null) =>
-      v === null ? undefined : (v >= passLevel ? 'PASS' : 'FAIL');
-    const hmStatus = meanStatus(hmFF);
-    const gmStatus = meanStatus(gmFF);
+    const hmStatus: 'PASS' | 'FAIL' | undefined =
+      hmFF === null ? undefined : (hmFF >= passLevel ? 'PASS' : 'FAIL');
     const stats = computeStats(resolved, samples);
 
     const header = document.createElement('header');
@@ -273,7 +251,7 @@ export class FitTestHistoryPanel {
         <div class="ftc-time">${formatStartTime(t.startedAt)} · ${escapeHtml(protocolName(t.protocol))}</div>
       </div>
       <div class="ftc-overall">
-        <span class="ftc-mean device" title="Overall FF as reported by the PortaCount (native, internally geometric mean)">
+        <span class="ftc-mean device" title="Overall FF as reported by the PortaCount (native).">
           <span class="label">device</span>
           <span class="ff">${ff !== null ? ff.toFixed(1) : '—'}</span>
           <span class="pill ${pillClass(status, t.aborted)}">${pillLabel(status, t.aborted)}</span>
@@ -283,13 +261,6 @@ export class FitTestHistoryPanel {
             <span class="label">HM · OSHA</span>
             <span class="ff">${hmFF.toFixed(1)}</span>
             <span class="pill ${pillClass(hmStatus, undefined)}">${pillLabel(hmStatus, undefined)}</span>
-          </span>
-        ` : ''}
-        ${gmFF !== null ? `
-          <span class="ftc-mean gm" title="Geometric mean of per-exercise FFs — matches the PortaCount's native overall-FF algorithm. Pass level ${passLevel}.">
-            <span class="label">GM · PortaCount</span>
-            <span class="ff">${gmFF.toFixed(1)}</span>
-            <span class="pill ${pillClass(gmStatus, undefined)}">${pillLabel(gmStatus, undefined)}</span>
           </span>
         ` : ''}
       </div>
@@ -522,7 +493,6 @@ function buildCsv(t: FitTestRecord, samples: FitTestSampleRecord[]): string {
   const r = t.result;
   const resolved = resolveExercises(t, samples);
   if (r) {
-    // Device-native (PortaCount uses geometric mean internally).
     lines.push(`# overallFF_device,${r.ffOverall ?? ''},${r.ffOverallStatus ?? ''}`);
   }
   const hm = harmonicMeanFF(resolved);
@@ -530,12 +500,6 @@ function buildCsv(t: FitTestRecord, samples: FitTestSampleRecord[]): string {
     const hmPass = hm >= t.mask.passLevel ? 'PASS' : 'FAIL';
     // OSHA 29 CFR 1910.134 Appendix A: overall FF = harmonic mean.
     lines.push(`# overallFF_harmonicMean_OSHA,${hm.toFixed(2)},${hmPass}`);
-  }
-  const gm = geometricMeanFF(resolved);
-  if (gm !== null) {
-    const gmPass = gm >= t.mask.passLevel ? 'PASS' : 'FAIL';
-    // Geometric mean — matches the PortaCount firmware's native rollup.
-    lines.push(`# overallFF_geometricMean_PortaCount,${gm.toFixed(2)},${gmPass}`);
   }
   lines.push('');
   // source = device | computed | none. "computed" rows are filled in
