@@ -51,20 +51,39 @@ function sampleFF(s: FitTestSampleRecord): number | null {
   return s.amb / s.mask;
 }
 
-/** OSHA harmonic mean over non-excluded exercise FFs. Returns null
- *  unless all included exercises have a numeric FF — partial means
- *  are misleading. */
+/** OSHA-mandated overall fit factor: harmonic mean of non-excluded
+ *  per-exercise FFs. Returns null unless all included exercises have a
+ *  numeric FF — partial means are misleading. */
 function harmonicMeanFF(exercises: ResolvedExercise[]): number | null {
+  const ffs = includedFFs(exercises);
+  if (ffs === null) return null;
+  let sumRecip = 0;
+  for (const f of ffs) sumRecip += 1 / f;
+  return ffs.length / sumRecip;
+}
+
+/** Geometric mean of non-excluded per-exercise FFs. Matches the
+ *  PortaCount 8030/8038 firmware's native overall-FF computation;
+ *  empirically the device's `<FF_OVERALL>` tracks GM within ~0.2%. */
+function geometricMeanFF(exercises: ResolvedExercise[]): number | null {
+  const ffs = includedFFs(exercises);
+  if (ffs === null) return null;
+  let sumLog = 0;
+  for (const f of ffs) sumLog += Math.log(f);
+  return Math.exp(sumLog / ffs.length);
+}
+
+function includedFFs(exercises: ResolvedExercise[]): number[] | null {
   const included = exercises.filter((e) => e.status !== 'EXCLUDED');
   if (included.length === 0) return null;
-  let sumRecip = 0;
+  const out: number[] = [];
   for (const e of included) {
     if (e.fitFactor === null || !Number.isFinite(e.fitFactor) || e.fitFactor <= 0) {
       return null;
     }
-    sumRecip += 1 / e.fitFactor;
+    out.push(e.fitFactor);
   }
-  return included.length / sumRecip;
+  return out;
 }
 
 interface ResolvedExercise {
@@ -81,7 +100,16 @@ interface ResolvedExercise {
  *  Per-exercise FF is computed from samples as a fallback when the
  *  device didn't report (the 8030 has been observed to omit INDEX
  *  blocks entirely on some runs). The protocol drives the row set —
- *  one resolved row per protocol exercise. */
+ *  one resolved row per protocol exercise.
+ *
+ *  Host computation uses the OSHA-style "sandwich" formula:
+ *      FF_i = (avg_amb_before_i + avg_amb_after_i) / 2 / avg_mask_i
+ *  where amb_before_i is the AMBIENT_SAMPLE block tagged with this
+ *  exercise number, and amb_after_i is the AMBIENT_SAMPLE block tagged
+ *  with the *next* exercise number (the device tags the post-test
+ *  ambient with exerciseNumber = N+1). Sample filtering is strictly by
+ *  `phase` — the device leaves `*Status=TESTING` set across all phases,
+ *  so trusting *Status would include purge transients. */
 function resolveExercises(
   t: FitTestRecord,
   samples: FitTestSampleRecord[],
@@ -89,11 +117,9 @@ function resolveExercises(
   const deviceById = new Map<number, ExerciseResult>();
   for (const e of t.result?.exercises ?? []) deviceById.set(e.index, e);
 
-  const avgAmb = mean(
-    samples
-      .filter((s) => (s.phase === 'AMBIENT_SAMPLE' || s.ambStatus === 'TESTING') && s.amb > 0)
-      .map((s) => s.amb),
-  );
+  // Per-exercise-index averages over the relevant phase only.
+  const ambByEx = phaseAverage(samples, 'AMBIENT_SAMPLE', (s) => s.amb);
+  const maskByEx = phaseAverage(samples, 'MASK_SAMPLE', (s) => s.mask);
 
   const out: ResolvedExercise[] = [];
   const protocolExercises = t.protocol.exercises ?? [];
@@ -110,19 +136,21 @@ function resolveExercises(
       });
       continue;
     }
-    // Host-computed fallback. We use mask samples tagged with this
-    // exercise number; phase is preferred but tolerated as absent for
-    // older sample records (pre-exerciseNumber instrumentation).
-    const maskVals = samples
-      .filter((s) =>
-        s.exerciseNumber === i &&
-        (s.phase === undefined || s.phase === 'MASK_SAMPLE' || s.maskStatus === 'TESTING') &&
-        s.mask > 0,
-      )
-      .map((s) => s.mask);
-    const avgMask = mean(maskVals);
+    const ambBefore = ambByEx.get(i);
+    const ambAfter = ambByEx.get(i + 1);
+    const avgMask = maskByEx.get(i);
+    // Sandwich-FF when both before and after are present; fall back to
+    // whichever side is available.
+    let avgAmb: number | null = null;
+    if (ambBefore !== undefined && ambAfter !== undefined) {
+      avgAmb = (ambBefore + ambAfter) / 2;
+    } else if (ambBefore !== undefined) {
+      avgAmb = ambBefore;
+    } else if (ambAfter !== undefined) {
+      avgAmb = ambAfter;
+    }
     let ff: number | null = null;
-    if (avgAmb !== null && avgMask !== null && avgMask > 0) {
+    if (avgAmb !== null && avgMask !== undefined && avgMask > 0) {
       ff = avgAmb / avgMask;
     }
     const status: ResolvedExercise['status'] = pe.excluded
@@ -141,12 +169,29 @@ function resolveExercises(
   return out;
 }
 
-function mean(xs: number[]): number | null {
-  if (xs.length === 0) return null;
-  let s = 0;
-  for (const x of xs) s += x;
-  return s / xs.length;
+/** For each exerciseNumber bucket, the mean of `project(s)` over
+ *  samples whose `phase` matches exactly. Returns a Map keyed by
+ *  exerciseNumber (may include N+1 for the post-test ambient block). */
+function phaseAverage(
+  samples: FitTestSampleRecord[],
+  phase: string,
+  project: (s: FitTestSampleRecord) => number,
+): Map<number, number> {
+  const sums = new Map<number, { sum: number; n: number }>();
+  for (const s of samples) {
+    if (s.phase !== phase) continue;
+    if (s.exerciseNumber === undefined) continue;
+    const v = project(s);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    const cur = sums.get(s.exerciseNumber);
+    if (cur) { cur.sum += v; cur.n += 1; }
+    else sums.set(s.exerciseNumber, { sum: v, n: 1 });
+  }
+  const out = new Map<number, number>();
+  for (const [k, v] of sums) out.set(k, v.sum / v.n);
+  return out;
 }
+
 
 export interface ActiveFitTestHandle {
   /** Append a sample to the live placeholder card and re-paint its chart. */
@@ -213,8 +258,12 @@ export class FitTestHistoryPanel {
     const status = result?.ffOverallStatus;
     const resolved = resolveExercises(t, samples);
     const hmFF = harmonicMeanFF(resolved);
-    const hmStatus: 'PASS' | 'FAIL' | undefined =
-      hmFF !== null ? (hmFF >= t.mask.passLevel ? 'PASS' : 'FAIL') : undefined;
+    const gmFF = geometricMeanFF(resolved);
+    const passLevel = t.mask.passLevel;
+    const meanStatus = (v: number | null) =>
+      v === null ? undefined : (v >= passLevel ? 'PASS' : 'FAIL');
+    const hmStatus = meanStatus(hmFF);
+    const gmStatus = meanStatus(gmFF);
     const stats = computeStats(resolved, samples);
 
     const header = document.createElement('header');
@@ -224,12 +273,23 @@ export class FitTestHistoryPanel {
         <div class="ftc-time">${formatStartTime(t.startedAt)} · ${escapeHtml(protocolName(t.protocol))}</div>
       </div>
       <div class="ftc-overall">
-        <span class="ff">${ff !== null ? ff.toFixed(1) : '—'}</span>
-        <span class="pill ${pillClass(status, t.aborted)}">${pillLabel(status, t.aborted)}</span>
+        <span class="ftc-mean device" title="Overall FF as reported by the PortaCount (native, internally geometric mean)">
+          <span class="label">device</span>
+          <span class="ff">${ff !== null ? ff.toFixed(1) : '—'}</span>
+          <span class="pill ${pillClass(status, t.aborted)}">${pillLabel(status, t.aborted)}</span>
+        </span>
         ${hmFF !== null ? `
-          <span class="ftc-hm" title="Harmonic mean of non-excluded per-exercise FFs, compared against pass level ${t.mask.passLevel} (host-computed)">
-            HM ${hmFF.toFixed(1)}
+          <span class="ftc-mean hm" title="Harmonic mean of per-exercise FFs — required by OSHA 29 CFR 1910.134 Appendix A. Pass level ${passLevel}.">
+            <span class="label">HM · OSHA</span>
+            <span class="ff">${hmFF.toFixed(1)}</span>
             <span class="pill ${pillClass(hmStatus, undefined)}">${pillLabel(hmStatus, undefined)}</span>
+          </span>
+        ` : ''}
+        ${gmFF !== null ? `
+          <span class="ftc-mean gm" title="Geometric mean of per-exercise FFs — matches the PortaCount's native overall-FF algorithm. Pass level ${passLevel}.">
+            <span class="label">GM · PortaCount</span>
+            <span class="ff">${gmFF.toFixed(1)}</span>
+            <span class="pill ${pillClass(gmStatus, undefined)}">${pillLabel(gmStatus, undefined)}</span>
           </span>
         ` : ''}
       </div>
@@ -243,6 +303,13 @@ export class FitTestHistoryPanel {
 
     // Inline AMB/MASK chart — same shape as the sampling cards, just
     // without the FF axis (FF lives on per-exercise rows, not samples).
+    // Tucked into a details expando so the card stays compact; click to
+    // expand. paintFittestChart is no-op when the SVG isn't laid out, so
+    // we re-paint when the details opens.
+    const chartDetails = document.createElement('details');
+    chartDetails.className = 'ftc-chart-details';
+    const chartSummary = document.createElement('summary');
+    chartSummary.textContent = 'Chart (ambient / mask / FF over time)';
     const chartWrap = document.createElement('div');
     chartWrap.className = 'ftc-svg-wrap';
     const chartSvg = document.createElementNS(SVG_NS, 'svg');
@@ -254,8 +321,12 @@ export class FitTestHistoryPanel {
     tooltip.className = 'ftc-tooltip';
     tooltip.style.display = 'none';
     chartWrap.appendChild(tooltip);
-    card.appendChild(chartWrap);
+    chartDetails.append(chartSummary, chartWrap);
+    card.appendChild(chartDetails);
     paintFittestChart(card, samples);
+    chartDetails.addEventListener('toggle', () => {
+      if (chartDetails.open) paintFittestChart(card, samples);
+    });
 
     if (resolved.length) {
       const exList = document.createElement('div');
@@ -451,12 +522,20 @@ function buildCsv(t: FitTestRecord, samples: FitTestSampleRecord[]): string {
   const r = t.result;
   const resolved = resolveExercises(t, samples);
   if (r) {
-    lines.push(`# overallFF,${r.ffOverall ?? ''},${r.ffOverallStatus}`);
+    // Device-native (PortaCount uses geometric mean internally).
+    lines.push(`# overallFF_device,${r.ffOverall ?? ''},${r.ffOverallStatus ?? ''}`);
   }
   const hm = harmonicMeanFF(resolved);
   if (hm !== null) {
     const hmPass = hm >= t.mask.passLevel ? 'PASS' : 'FAIL';
-    lines.push(`# overallFF_harmonicMean,${hm.toFixed(2)},${hmPass}`);
+    // OSHA 29 CFR 1910.134 Appendix A: overall FF = harmonic mean.
+    lines.push(`# overallFF_harmonicMean_OSHA,${hm.toFixed(2)},${hmPass}`);
+  }
+  const gm = geometricMeanFF(resolved);
+  if (gm !== null) {
+    const gmPass = gm >= t.mask.passLevel ? 'PASS' : 'FAIL';
+    // Geometric mean — matches the PortaCount firmware's native rollup.
+    lines.push(`# overallFF_geometricMean_PortaCount,${gm.toFixed(2)},${gmPass}`);
   }
   lines.push('');
   // source = device | computed | none. "computed" rows are filled in

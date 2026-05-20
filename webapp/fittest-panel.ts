@@ -135,9 +135,19 @@ export class FitTestPanel {
     const rows: HTMLElement[] = items.map((e) => {
       const row = document.createElement('div');
       row.className = 'fittest-exrow';
+      if (e.status === 'TESTING') row.classList.add('active');
       const nameEl = document.createElement('span');
       nameEl.className = 'name';
-      nameEl.textContent = `${e.index + 1}. ${e.name || '(unnamed)'}`;
+      // Lead the active row with a CSS-animated spinner so the operator
+      // can see at a glance which exercise the device is on.
+      if (e.status === 'TESTING') {
+        const spinner = document.createElement('span');
+        spinner.className = 'fittest-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        nameEl.append(spinner, ` ${e.index + 1}. ${e.name || '(unnamed)'}`);
+      } else {
+        nameEl.textContent = `${e.index + 1}. ${e.name || '(unnamed)'}`;
+      }
       const ffEl = document.createElement('span');
       ffEl.className = 'ff';
       ffEl.textContent = e.fitFactor !== null ? e.fitFactor.toFixed(1) : '—';
@@ -217,6 +227,15 @@ function buildPanel(container: HTMLElement): PanelElements {
   exNumBox.append(exerciseNumber);
   concWrap.append(ambBox, maskBox, exNumBox);
 
+  // Tuck the live conc readings behind an expando — the phase/progress
+  // line and the exercise list are the things the operator watches
+  // moment-to-moment. The numeric readings are diagnostics.
+  const concDetails = document.createElement('details');
+  concDetails.className = 'fittest-conc-details';
+  const concSummary = document.createElement('summary');
+  concSummary.textContent = 'Live readings (ambient / mask / exercise)';
+  concDetails.append(concSummary, concWrap);
+
   const errorBanner = document.createElement('div');
   errorBanner.className = 'fittest-banner error';
   errorBanner.style.display = 'none';
@@ -230,7 +249,7 @@ function buildPanel(container: HTMLElement): PanelElements {
   const exerciseList = document.createElement('div');
   exerciseList.className = 'fittest-exlist';
 
-  root.append(header, progress, concWrap, errorBanner, warningBanner, exerciseListLabel, exerciseList);
+  root.append(header, progress, concDetails, errorBanner, warningBanner, exerciseListLabel, exerciseList);
   container.appendChild(root);
 
   return {

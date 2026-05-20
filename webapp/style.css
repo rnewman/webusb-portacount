@@ -375,17 +375,33 @@ main {
   font-size: 0.95rem;
 }
 
-.fittest-card .ftc-overall .ff {
+.fittest-card .ftc-overall {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.fittest-card .ftc-overall .ftc-mean {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.fittest-card .ftc-overall .ftc-mean .label {
+  font-size: 0.65rem;
+  color: #888;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fittest-card .ftc-overall .ftc-mean .ff {
+  font-family: 'SF Mono', 'Fira Code', monospace;
   color: #f59e0b;
 }
 
-.fittest-card .ftc-overall .ftc-hm {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
+.fittest-card .ftc-overall .ftc-mean.hm .ff,
+.fittest-card .ftc-overall .ftc-mean.gm .ff {
   color: #fbbf24;
-  opacity: 0.85;
+  font-size: 0.9rem;
 }
 
 .fittest-card .ftc-tooltip .tt-ff {
@@ -961,10 +977,51 @@ details.log-xml > pre {
   font-size: 0.85rem;
 }
 
+.fittest-exrow.active {
+  background: #1f2942;
+  outline: 1px solid #3b5588;
+}
+
 .fittest-exrow .ff {
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: #ddd;
   text-align: right;
+}
+
+.fittest-spinner {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.35em;
+  vertical-align: -0.1em;
+  border: 2px solid #2a3a5a;
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: fittest-spin 0.8s linear infinite;
+}
+
+@keyframes fittest-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fittest-conc-details,
+.ftc-chart-details {
+  margin: 0.4rem 0;
+}
+
+.fittest-conc-details > summary,
+.ftc-chart-details > summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #888;
+  padding: 0.2rem 0;
+  user-select: none;
+}
+
+.fittest-conc-details[open] > summary,
+.ftc-chart-details[open] > summary {
+  color: #aaa;
+  margin-bottom: 0.3rem;
 }
 
 .pill {
