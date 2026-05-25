@@ -58,6 +58,9 @@ interface Session {
   wire: RndisWireLayer;
   stack: LwipStack;
   pc: Portacount;
+  /** The USBDevice we opened, kept so the navigator.usb disconnect
+   * listener can match unplug events against the active session. */
+  device: USBDevice;
   pollHandle: ReturnType<typeof setInterval> | null;
   deviceInfo: DeviceInfo;
   /** Live card + IDB session id, populated while sampling. */
@@ -261,6 +264,19 @@ window.addEventListener('pagehide', () => {
   }
 });
 
+// USB unplug. Without this, the runner just keeps trying to poll a dead
+// transport — pc.command's exchange timeout would eventually fire (3 s),
+// but in practice the bulk-IN read can sit indefinitely against an
+// unplugged device, so we tear the session down explicitly here.
+if (navigator.usb) {
+  navigator.usb.addEventListener('disconnect', (e: USBConnectionEvent) => {
+    if (session && e.device === session.device) {
+      log('USB device unplugged — tearing down session.');
+      void disconnect();
+    }
+  });
+}
+
 async function connect(): Promise<void> {
   if (!navigator.usb) {
     throw new Error('WebUSB not available — use a Chromium-based browser over HTTPS or localhost.');
@@ -328,7 +344,7 @@ async function connect(): Promise<void> {
 
   pc.startKeepAlive();
 
-  session = { wire, stack, pc, pollHandle: null, deviceInfo: info, active: null };
+  session = { wire, stack, pc, device, pollHandle: null, deviceInfo: info, active: null };
   disconnectBtn.disabled = false;
   startBtn.disabled = false;
   setConnState('connected', `SN ${info.serialNumber} · ${info.modelNumber}`);

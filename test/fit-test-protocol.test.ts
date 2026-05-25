@@ -306,6 +306,32 @@ describe('parseFitTestStatus', () => {
     expect(s.exercises[2].status).toBe('NOT_STARTED'); // unrun
   });
 
+  it('does not synthesize TESTING for unnamed (padding) slots', () => {
+    // The device always echoes 12 EXERCISE blocks; slots beyond the
+    // protocol's exercise count are padding with empty NAME and
+    // EXCLUDE=true. During the post-test ambient the device advances
+    // EXERCISE_NUMBER to N+1 (a padding slot) — we must NOT promote it
+    // to TESTING or the UI sprouts a phantom "N+1. (unnamed)" row that
+    // then gets stuck at COMPUTING.
+    const xml = `<MAIN><FITTEST>
+      <STATUS>AMBIENT_SAMPLE</STATUS>
+      <DONE>false</DONE>
+      <EXERCISE_NUMBER>4</EXERCISE_NUMBER>
+      <FF_PASSLEVEL>100</FF_PASSLEVEL>
+      <AMB_CONC>3000</AMB_CONC>
+      <MASK_CONC>0</MASK_CONC>
+      <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>120.0</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR>130.0</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>2</INDEX><NAME>Head Side-to-Side</NAME><FITFACTOR>140.0</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>3</INDEX><NAME>Head Up and Down</NAME><FITFACTOR>150.0</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>4</INDEX><NAME></NAME><FITFACTOR>0.00</FITFACTOR><STATUS>IDLE</STATUS><EXCLUDE>true</EXCLUDE></EXERCISE>
+    </FITTEST></MAIN>`;
+    const s = parseFitTestStatus(xml);
+    expect(s.exercises[3].status).toBe('PASS');
+    expect(s.exercises[4].status).toBe('NOT_STARTED');
+    expect(s.exercises[4].name).toBe('');
+  });
+
   it('does not synthesize TESTING when DONE=true', () => {
     // Even if the device is at IDLE+DONE with EXERCISE_NUMBER pointing
     // at a slot, the test is over — no row should claim it's running.

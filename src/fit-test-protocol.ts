@@ -279,9 +279,21 @@ export function parseFitTestStatus(rawXml: string): FitTestStatus {
   // until it transitions directly to PASS/FAIL. Identify it via the
   // top-level phase + EXERCISE_NUMBER and promote it ourselves so the UI
   // can highlight the active row.
+  //
+  // Skip synthesis for slots whose NAME is empty — those are the padding
+  // entries the device echoes for slots beyond the protocol's exercise
+  // count. The 8030 advances EXERCISE_NUMBER to N+1 during the post-test
+  // ambient sample, which (without this guard) makes the UI sprout a
+  // phantom "N+1. (unnamed)" TESTING row that then gets stuck at
+  // COMPUTING when the device next reports IDLE for the slot.
   if (!status.done && isActivePhase(status.status)) {
     const cur = status.exerciseNumber;
-    if (cur >= 0 && cur < MAX_EXERCISES && exercises[cur].status === 'NOT_STARTED') {
+    if (
+      cur >= 0 &&
+      cur < MAX_EXERCISES &&
+      exercises[cur].status === 'NOT_STARTED' &&
+      exercises[cur].name !== ''
+    ) {
       exercises[cur] = { ...exercises[cur], status: 'TESTING' };
     }
   }

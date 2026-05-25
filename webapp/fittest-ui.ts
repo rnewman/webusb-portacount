@@ -138,6 +138,14 @@ export class FitTestUi {
   setPortacount(pc: Portacount | null, info: DeviceInfo | null): void {
     this.pc = pc;
     this.deviceInfo = info;
+    // If the Portacount we were polling has gone away (Disconnect button,
+    // USB unplug, HMR teardown) and a run is in flight, kick the runner
+    // so its promise rejects promptly instead of waiting for the next
+    // tick's pc.command to time out (or hang, if the USB transport
+    // dropped without a clean TCP close).
+    if (!pc && this.active) {
+      this.active.runner.abort().catch(() => undefined);
+    }
     // Connection state only gates the Start button — the form stays
     // editable so the user can pre-fill name/mask before plugging in.
     this.setFormEnabled(this.active === null);
