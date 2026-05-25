@@ -121,7 +121,7 @@ testing strategy, see [`docs/TESTING.md`](docs/TESTING.md).
 ```bash
 # Clone with submodules (lwIP).
 git clone --recursive <repo-url>
-cd webusb
+cd webusb-portacount
 
 # If you already cloned without --recursive:
 # git submodule update --init --recursive
@@ -140,6 +140,12 @@ npm install
 
 # Build the lwIP Wasm module.
 npm run build:wasm
+
+# Build the library.
+npm run build:lib
+
+# Build the webapp for packaging.
+npm run build:webapp
 
 # Start the dev server.
 npm run dev
