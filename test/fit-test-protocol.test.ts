@@ -153,7 +153,7 @@ describe('parseFitTestStatus', () => {
     <LOW_PARTICLE_WARNING>false</LOW_PARTICLE_WARNING>
   </FITTEST></MAIN>`;
 
-  it('parses an IDLE pre-start snapshot with no INDEX entries', () => {
+  it('parses an IDLE pre-start snapshot with no EXERCISE entries', () => {
     const s = parseFitTestStatus(idleXml);
     expect(s.status).toBe('IDLE');
     expect(s.done).toBe(false);
@@ -185,12 +185,12 @@ describe('parseFitTestStatus', () => {
     <TOTAL_SECONDS>72</TOTAL_SECONDS>
     <LOW_ALCOHOL_WARNING>false</LOW_ALCOHOL_WARNING>
     <LOW_PARTICLE_WARNING>false</LOW_PARTICLE_WARNING>
-    <INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>102.3</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE>
-    <INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR></FITFACTOR><STATUS>TESTING</STATUS><EXCLUDE>false</EXCLUDE>
-    <INDEX>2</INDEX><NAME>Head Side-to-Side</NAME><FITFACTOR></FITFACTOR><STATUS>NOT_STARTED</STATUS><EXCLUDE>false</EXCLUDE>
+    <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>102.3</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+    <EXERCISE><INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR></FITFACTOR><STATUS>TESTING</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+    <EXERCISE><INDEX>2</INDEX><NAME>Head Side-to-Side</NAME><FITFACTOR></FITFACTOR><STATUS>IDLE</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
   </FITTEST></MAIN>`;
 
-  it('parses mid-test snapshot with per-exercise INDEX blocks', () => {
+  it('parses mid-test snapshot with per-exercise EXERCISE blocks', () => {
     const s = parseFitTestStatus(midTestXml);
     expect(s.status).toBe('MASK_SAMPLE');
     expect(s.progressPercent).toBe(33);
@@ -239,8 +239,8 @@ describe('parseFitTestStatus', () => {
     <TOTAL_SECONDS>180</TOTAL_SECONDS>
     <LOW_ALCOHOL_WARNING>false</LOW_ALCOHOL_WARNING>
     <LOW_PARTICLE_WARNING>false</LOW_PARTICLE_WARNING>
-    <INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>200.2</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE>
-    <INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR>196.7</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE>
+    <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>200.2</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+    <EXERCISE><INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR>196.7</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
   </FITTEST></MAIN>`;
 
   it('parses DONE=true / FF_OVERALL=PASS terminal snapshot', () => {
@@ -269,7 +269,7 @@ describe('parseFitTestStatus', () => {
     <TOTAL_SECONDS>90</TOTAL_SECONDS>
     <LOW_ALCOHOL_WARNING>false</LOW_ALCOHOL_WARNING>
     <LOW_PARTICLE_WARNING>false</LOW_PARTICLE_WARNING>
-    <INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>5.2</FITFACTOR><STATUS>FAIL</STATUS><EXCLUDE>false</EXCLUDE>
+    <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>5.2</FITFACTOR><STATUS>FAIL</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
   </FITTEST></MAIN>`;
 
   it('parses error/terminate-overall-FF snapshot', () => {
@@ -282,6 +282,49 @@ describe('parseFitTestStatus', () => {
   it('tolerates trailing \\r\\r and \\0 padding', () => {
     const s = parseFitTestStatus(idleXml + '\r\r\0\0');
     expect(s.status).toBe('IDLE');
+  });
+
+  it('promotes the active exercise to TESTING when device reports IDLE', () => {
+    // Real device behavior: per-exercise STATUS stays IDLE for both
+    // pre-start and the currently-running exercise. The host has to
+    // synthesize TESTING from top-level STATUS + EXERCISE_NUMBER.
+    const xml = `<MAIN><FITTEST>
+      <STATUS>MASK_SAMPLE</STATUS>
+      <DONE>false</DONE>
+      <EXERCISE_NUMBER>1</EXERCISE_NUMBER>
+      <FF_OVERALL></FF_OVERALL>
+      <FF_PASSLEVEL>100</FF_PASSLEVEL>
+      <AMB_CONC>3000</AMB_CONC>
+      <MASK_CONC>20</MASK_CONC>
+      <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>201.00</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR>0.00</FITFACTOR><STATUS>IDLE</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>2</INDEX><NAME>Head Side-to-Side</NAME><FITFACTOR>0.00</FITFACTOR><STATUS>IDLE</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+    </FITTEST></MAIN>`;
+    const s = parseFitTestStatus(xml);
+    expect(s.exercises[0].status).toBe('PASS');
+    expect(s.exercises[1].status).toBe('TESTING'); // synthesized
+    expect(s.exercises[2].status).toBe('NOT_STARTED'); // unrun
+  });
+
+  it('does not synthesize TESTING when DONE=true', () => {
+    // Even if the device is at IDLE+DONE with EXERCISE_NUMBER pointing
+    // at a slot, the test is over — no row should claim it's running.
+    const xml = `<MAIN><FITTEST>
+      <STATUS>IDLE</STATUS>
+      <DONE>true</DONE>
+      <EXERCISE_NUMBER>1</EXERCISE_NUMBER>
+      <FF_OVERALL>198.4</FF_OVERALL>
+      <FF_OVERALL_STATUS>PASS</FF_OVERALL_STATUS>
+      <FF_PASSLEVEL>100</FF_PASSLEVEL>
+      <AMB_CONC>0</AMB_CONC>
+      <MASK_CONC>0</MASK_CONC>
+      <EXERCISE><INDEX>0</INDEX><NAME>Normal Breathing</NAME><FITFACTOR>200.2</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>1</INDEX><NAME>Deep Breathing</NAME><FITFACTOR>196.7</FITFACTOR><STATUS>PASS</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>
+      <EXERCISE><INDEX>2</INDEX><NAME></NAME><FITFACTOR>0.00</FITFACTOR><STATUS>IDLE</STATUS><EXCLUDE>true</EXCLUDE></EXERCISE>
+    </FITTEST></MAIN>`;
+    const s = parseFitTestStatus(xml);
+    expect(s.exercises[1].status).toBe('PASS');
+    expect(s.exercises[2].status).toBe('NOT_STARTED');
   });
 
   it('treats ERROR=UNSET as no-error', () => {
@@ -306,7 +349,7 @@ describe('diffFitTestStatus', () => {
   // Build minimal snapshots by parsing canned XMLs.
   function status(opts: { done?: boolean; ex: Array<{ name: string; ff: number | null; status: string }> }): ReturnType<typeof parseFitTestStatus> {
     const indexBlocks = opts.ex.map((e, i) =>
-      `<INDEX>${i}</INDEX><NAME>${e.name}</NAME><FITFACTOR>${e.ff ?? ''}</FITFACTOR><STATUS>${e.status}</STATUS><EXCLUDE>false</EXCLUDE>`,
+      `<EXERCISE><INDEX>${i}</INDEX><NAME>${e.name}</NAME><FITFACTOR>${e.ff ?? ''}</FITFACTOR><STATUS>${e.status}</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>`,
     ).join('\n');
     return parseFitTestStatus(`<MAIN><FITTEST>
       <STATUS>RUNNING</STATUS>

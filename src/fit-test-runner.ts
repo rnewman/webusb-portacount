@@ -201,14 +201,20 @@ export class FitTestRunner {
       return;
     }
     // Don't let a NOT_STARTED downgrade an already-known exercise.
+    // If we previously synthesized TESTING for this slot and now the
+    // device reports NOT_STARTED (i.e. EXERCISE_NUMBER has moved on but
+    // the device hasn't committed PASS/FAIL yet), park the slot at
+    // COMPUTING so the UI doesn't keep showing it as actively running
+    // alongside the new active exercise.
     if (s.status === 'NOT_STARTED' && cur.status !== 'NOT_STARTED') {
+      if (cur.status === 'TESTING') cur.status = 'COMPUTING';
       // Preserve the latest non-empty name / fitFactor if the device
       // does send one alongside the cleared status.
       if (s.name !== '') cur.name = s.name;
       if (s.fitFactor !== null) cur.fitFactor = s.fitFactor;
       return;
     }
-    // Don't downgrade terminal → testing.
+    // Don't downgrade terminal → testing / computing.
     if (isTerminal(cur.status) && !isTerminal(s.status)) {
       if (s.name !== '' && cur.name === '') cur.name = s.name;
       return;
@@ -323,9 +329,14 @@ export class FitTestRunner {
     for (const ex of next.exercises) {
       this.mergeExerciseSnapshot(ex);
     }
-    const augmentedExercises = next.exercises.map(
-      (ex) => this.bestExercises.get(ex.index) ?? ex,
-    );
+    // Clone on read — bestExercises entries are mutated in place by
+    // mergeExerciseSnapshot, and consumers may keep snapshot references
+    // (e.g. for diffing or replay). Without the clone, a later mutation
+    // would retroactively change a prior snapshot's exercises[].
+    const augmentedExercises = next.exercises.map((ex) => {
+      const best = this.bestExercises.get(ex.index);
+      return best ? { ...best } : ex;
+    });
     const augmented: FitTestStatus = { ...next, exercises: augmentedExercises };
     this.callbacks.onStatusUpdate?.(augmented);
 

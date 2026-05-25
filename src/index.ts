@@ -17,7 +17,7 @@ export type {
   DeviceInfo,
   ParsedResponse,
   PortacountTrace,
-  FittestIndexRaw,
+  FittestExerciseRaw,
 } from './portacount';
 export { FitTestRunner, FitTestAbortedError } from './fit-test-runner';
 export type { FitTestRunArgs } from './fit-test-runner';

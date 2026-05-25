@@ -70,10 +70,20 @@ export interface FitTestStartOptions {
   endOnOverallFFUnachievable: boolean;
 }
 
-/** Terminal status of one exercise. */
+/** Status of one exercise as the test progresses.
+ *
+ * `COMPUTING` is host-synthesized: the 8030 sends per-exercise STATUS
+ * only as `IDLE` / `PASS` / `FAIL` / `EXCLUDED`. The currently-active
+ * exercise stays at `IDLE` (which we promote to `TESTING`), and after
+ * its mask sample ends the device leaves it at `IDLE` for one or more
+ * polls while it computes the fit factor — during which `EXERCISE_NUMBER`
+ * has already advanced. The runner detects that gap and parks the slot
+ * at `COMPUTING` until the device commits `PASS` or `FAIL`, so the UI
+ * doesn't show two simultaneously-`TESTING` rows. */
 export type ExerciseStatus =
   | 'NOT_STARTED'
   | 'TESTING'
+  | 'COMPUTING'
   | 'PASS'
   | 'FAIL'
   | 'EXCLUDED';
@@ -127,13 +137,13 @@ export interface FitTestStatus {
   raw: Record<string, unknown>;
 }
 
-/** Final per-exercise record, emitted when the exercise transitions out
- * of TESTING/NOT_STARTED. */
+/** Final per-exercise record, emitted when the exercise transitions to
+ * a terminal status (PASS/FAIL/EXCLUDED). */
 export interface ExerciseResult {
   index: number;
   name: string;
   fitFactor: number | null;
-  status: Exclude<ExerciseStatus, 'NOT_STARTED' | 'TESTING'>;
+  status: Exclude<ExerciseStatus, 'NOT_STARTED' | 'TESTING' | 'COMPUTING'>;
 }
 
 /** Returned by {@link FitTestRunner.run} on success. */

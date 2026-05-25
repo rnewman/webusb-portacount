@@ -87,7 +87,7 @@ function fittestXml(opts: {
 }): string {
   const blocks = (opts.blocks ?? [])
     .map((b) =>
-      `<INDEX>${b.index}</INDEX><NAME>${b.name}</NAME><FITFACTOR>${b.ff ?? ''}</FITFACTOR><STATUS>${b.status}</STATUS><EXCLUDE>false</EXCLUDE>`,
+      `<EXERCISE><INDEX>${b.index}</INDEX><NAME>${b.name}</NAME><FITFACTOR>${b.ff ?? ''}</FITFACTOR><STATUS>${b.status}</STATUS><EXCLUDE>false</EXCLUDE></EXERCISE>`,
     )
     .join('');
   return [

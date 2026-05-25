@@ -243,7 +243,10 @@ export class FitTestUi {
     }
 
     const runner = new FitTestRunner(this.pc, {
-      onStatusUpdate: (s) => this.panel.update(s, { protocolName: chosen.displayName }),
+      onStatusUpdate: (s) => {
+        this.panel.update(s, { protocolName: chosen.displayName });
+        historyHandle?.updateStatus(s);
+      },
       onSample: (s) => {
         const sample = {
           testId,

@@ -129,7 +129,7 @@ function fittestResponse(opts: {
 }): string {
   const blocks = (opts.blocks ?? [])
     .map((b) =>
-      `<INDEX>${b.index}</INDEX><NAME>${b.name}</NAME><FITFACTOR>${b.ff ?? ''}</FITFACTOR><STATUS>${b.status}</STATUS><EXCLUDE>${b.exclude ? 'true' : 'false'}</EXCLUDE>`,
+      `<EXERCISE><INDEX>${b.index}</INDEX><NAME>${b.name}</NAME><FITFACTOR>${b.ff ?? ''}</FITFACTOR><STATUS>${b.status}</STATUS><EXCLUDE>${b.exclude ? 'true' : 'false'}</EXCLUDE></EXERCISE>`,
     )
     .join('');
   return `<MAIN><FITTEST>
@@ -310,6 +310,76 @@ describe('FitTestRunner: happy path', () => {
       { index: 1, name: 'Deep Breathing', status: 'PASS', fitFactor: 145 },
     ]);
     expect(result.ffOverall).toBe(131);
+  });
+
+  it('parks just-finished exercise at COMPUTING while device computes its FF', async () => {
+    // Real device behavior: after a slot's mask sample ends and
+    // EXERCISE_NUMBER advances, the device keeps the just-finished
+    // exercise at STATUS=IDLE for one or more polls while it computes
+    // the fit factor. Without intervention the host would either keep
+    // showing it as TESTING (sticky from synthesized promotion) or yo-yo
+    // it back to NOT_STARTED. We park it at COMPUTING instead so the
+    // UI can distinguish it from the currently-active exercise.
+    const stub = new StubPortacount();
+    stub.pollResponses = [
+      // ex 0 actively sampling (device reports IDLE → host promotes to TESTING).
+      fittestResponse({
+        status: 'MASK_SAMPLE', exerciseNumber: 0,
+        ambStatus: 'PASS', ambConc: 2500, maskStatus: 'TESTING', maskConc: 30,
+        blocks: [
+          { index: 0, name: 'Normal Breathing', status: 'NOT_STARTED' },
+          { index: 1, name: 'Deep Breathing', status: 'NOT_STARTED' },
+        ],
+      }),
+      // EXERCISE_NUMBER has moved to 1 but ex 0 still IDLE — host should
+      // demote ex 0 from TESTING to COMPUTING, promote ex 1 to TESTING.
+      fittestResponse({
+        status: 'MASK_SAMPLE', exerciseNumber: 1,
+        ambStatus: 'PASS', ambConc: 2500, maskStatus: 'TESTING', maskConc: 28,
+        blocks: [
+          { index: 0, name: 'Normal Breathing', status: 'NOT_STARTED' },
+          { index: 1, name: 'Deep Breathing', status: 'NOT_STARTED' },
+        ],
+      }),
+      // Device finally commits ex 0 = PASS — COMPUTING resolves to terminal.
+      fittestResponse({
+        status: 'MASK_SAMPLE', exerciseNumber: 1,
+        ambStatus: 'PASS', ambConc: 2500, maskStatus: 'TESTING', maskConc: 28,
+        blocks: [
+          { index: 0, name: 'Normal Breathing', status: 'PASS', ff: 120 },
+          { index: 1, name: 'Deep Breathing', status: 'NOT_STARTED' },
+        ],
+      }),
+      fittestResponse({
+        status: 'IDLE', done: true, ffOverall: 130, ffOverallStatus: 'PASS',
+        blocks: [
+          { index: 0, name: 'Normal Breathing', status: 'PASS', ff: 120 },
+          { index: 1, name: 'Deep Breathing', status: 'PASS', ff: 145 },
+        ],
+      }),
+    ];
+    const statuses: FitTestStatus[] = [];
+    const completed: ExerciseResult[] = [];
+    const runner = new FitTestRunner(stub.asPortacount(), {
+      onStatusUpdate: (s) => statuses.push(s),
+      onExerciseCompleted: (r) => completed.push(r),
+    });
+    const p = runner.run({
+      person: STOCK_PERSON, mask: STOCK_MASK, protocol: STOCK_PROTOCOL,
+      start: STOCK_START, deviceModel: '8030',
+    });
+    await vi.runAllTimersAsync();
+    await p;
+    // Snapshot 1: ex 0 active (TESTING), ex 1 not yet started.
+    expect(statuses[0].exercises[0].status).toBe('TESTING');
+    expect(statuses[0].exercises[1].status).toBe('NOT_STARTED');
+    // Snapshot 2: ex 0 has been parked at COMPUTING, ex 1 is now active.
+    expect(statuses[1].exercises[0].status).toBe('COMPUTING');
+    expect(statuses[1].exercises[1].status).toBe('TESTING');
+    // Snapshot 3: ex 0 transitions COMPUTING → PASS (terminal sticks).
+    expect(statuses[2].exercises[0].status).toBe('PASS');
+    // Only one completion event fires per slot, on the terminal transition.
+    expect(completed.map((e) => `${e.index}:${e.status}`)).toEqual(['0:PASS', '1:PASS']);
   });
 
   it('forwards live AMB/MASK samples to onSample only while TESTING', async () => {

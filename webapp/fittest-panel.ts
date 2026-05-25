@@ -32,6 +32,10 @@ interface PanelElements {
 
 export class FitTestPanel {
   private els: PanelElements;
+  /** Last-rendered exercise-list signature; we skip the rebuild when the
+   *  visible rows haven't changed so the active row's CSS spinner doesn't
+   *  restart its animation on every poll. */
+  private lastExerciseKey = '';
 
   constructor(container: HTMLElement) {
     container.replaceChildren();
@@ -66,6 +70,7 @@ export class FitTestPanel {
     this.els.errorBanner.style.display = 'none';
     this.els.warningBanner.style.display = 'none';
     this.els.exerciseList.replaceChildren();
+    this.lastExerciseKey = '';
   }
 
   /** Render the given snapshot. */
@@ -128,6 +133,14 @@ export class FitTestPanel {
       }
     }
     const items = exercises.slice(0, lastUseful + 1);
+    // Skip the rebuild if nothing visible changed. Without this guard
+    // the spinner on the active row restarts its CSS animation every
+    // poll because replaceChildren() recreates the DOM node.
+    const key = items
+      .map((e) => `${e.index}|${e.name}|${e.status}|${e.fitFactor ?? ''}|${e.excluded}`)
+      .join('\n');
+    if (key === this.lastExerciseKey) return;
+    this.lastExerciseKey = key;
     if (items.length === 0) {
       this.els.exerciseList.replaceChildren();
       return;
@@ -135,12 +148,14 @@ export class FitTestPanel {
     const rows: HTMLElement[] = items.map((e) => {
       const row = document.createElement('div');
       row.className = 'fittest-exrow';
-      if (e.status === 'TESTING') row.classList.add('active');
+      if (e.status === 'TESTING' || e.status === 'COMPUTING') row.classList.add('active');
       const nameEl = document.createElement('span');
       nameEl.className = 'name';
       // Lead the active row with a CSS-animated spinner so the operator
-      // can see at a glance which exercise the device is on.
-      if (e.status === 'TESTING') {
+      // can see at a glance which exercise the device is on. The same
+      // spinner also stays during COMPUTING so the just-finished slot
+      // doesn't look frozen while the device works out its fit factor.
+      if (e.status === 'TESTING' || e.status === 'COMPUTING') {
         const spinner = document.createElement('span');
         spinner.className = 'fittest-spinner';
         spinner.setAttribute('aria-hidden', 'true');
@@ -273,6 +288,7 @@ function setPillForExercise(el: HTMLElement, status: ExerciseStatus): void {
     case 'PASS': el.classList.add('pass'); el.textContent = 'PASS'; break;
     case 'FAIL': el.classList.add('fail'); el.textContent = 'FAIL'; break;
     case 'TESTING': el.classList.add('testing'); el.textContent = 'TESTING'; break;
+    case 'COMPUTING': el.classList.add('computing'); el.textContent = 'COMPUTING'; break;
     case 'EXCLUDED': el.classList.add('excluded'); el.textContent = 'EXCLUDED'; break;
     default: el.classList.add('not-started'); el.textContent = '—'; break;
   }

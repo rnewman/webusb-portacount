@@ -1037,5 +1037,6 @@ details.log-xml > pre {
 .pill.pass { background: #1a3a2a; color: #4ade80; }
 .pill.fail { background: #3a1a1a; color: #f87171; }
 .pill.testing { background: #1a2a3a; color: #60a5fa; }
+.pill.computing { background: #2a2540; color: #c084fc; }
 .pill.excluded { background: #2a2a2a; color: #888; }
 .pill.not-started { background: #1a1a2e; color: #555; }

@@ -58,10 +58,10 @@ const utf8 = new TextEncoder();
  * tests want '0' to stay '0', not become 0 or false). All keys are
  * optional — the device only includes the tags relevant to the command.
  */
-/** One per-exercise block within a FITTEST/ALL response. The position
- * comes through under the `INDEX` key (the device wraps each per-exercise
- * block under its own `<INDEX>n</INDEX>` element). */
-export interface FittestIndexRaw {
+/** One per-exercise block within a FITTEST/ALL response. The device
+ * wraps each one in an `<EXERCISE>...</EXERCISE>` element whose `<INDEX>`
+ * child names the slot position. */
+export interface FittestExerciseRaw {
   INDEX?: string;
   NAME?: string;
   FITFACTOR?: string;
@@ -113,7 +113,7 @@ export interface ParsedResponse {
       LOW_PARTICLE_WARNING?: string;
       /** Per-exercise blocks; fast-xml-parser returns one as an object,
        * multiple as an array. The runner normalizes this. */
-      INDEX?: FittestIndexRaw | FittestIndexRaw[];
+      EXERCISE?: FittestExerciseRaw | FittestExerciseRaw[];
       [tag: string]: unknown;
     };
     DAILYCHECK?: Record<string, string | undefined>;

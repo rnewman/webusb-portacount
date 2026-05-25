@@ -10,9 +10,11 @@
  * No I/O, no timers — everything here is synchronous and pure so it can
  * be unit-tested without the wire layer.
  *
- * Per-exercise blocks come back as *flat siblings* of `<INDEX>n</INDEX>`
- * markers, not nested children. We use `preserveOrder` parsing to keep
- * that sibling ordering intact.
+ * Per-exercise blocks come back wrapped in `<EXERCISE>...</EXERCISE>`
+ * elements containing nested `<INDEX>` / `<NAME>` / `<FITFACTOR>` /
+ * `<STATUS>` / `<EXCLUDE>` children. We use `preserveOrder` parsing
+ * because top-level `<STATUS>` and per-exercise `<STATUS>` share a tag
+ * name and we need to keep the two scopes separate.
  */
 
 import { XMLParser } from 'fast-xml-parser';
@@ -171,9 +173,9 @@ export function xmlEscape(s: string): string {
 // fast-xml-parser with preserveOrder gives us each child element as a
 // single-key object in document order, e.g.
 //   [{ NEWDATA: [{ '#text': 'true' }] }, { STATUS: [{ '#text': 'IDLE' }] }, ...]
-// We need order because <STATUS> appears both at the FITTEST level and
-// inside each per-exercise INDEX block, and tags like NAME / FITFACTOR
-// follow their corresponding INDEX as flat siblings.
+// We use preserveOrder mainly to keep top-level <STATUS> isolated from
+// the <STATUS> nested inside each <EXERCISE> wrapper — both tag names
+// collide, and the FITTEST-level scan needs to ignore exercise scopes.
 
 interface OrderedNode {
   [tagName: string]: OrderedChild[] | OrderedAttrs;
@@ -202,23 +204,8 @@ export function parseFitTestStatus(rawXml: string): FitTestStatus {
 
   const fittestChildren = findFittestChildren(tree);
 
-  // Top-level fields (the first occurrence — pre-INDEX).
-  let firstIndexAt = -1;
-  for (let i = 0; i < fittestChildren.length; i++) {
-    const c = fittestChildren[i];
-    if (isElementNamed(c, 'INDEX')) { firstIndexAt = i; break; }
-  }
-  const topLevel: Record<string, string> = {};
-  const topLevelEnd = firstIndexAt === -1 ? fittestChildren.length : firstIndexAt;
-  for (let i = 0; i < topLevelEnd; i++) {
-    const c = fittestChildren[i];
-    const tag = tagNameOf(c);
-    if (tag !== null) {
-      topLevel[tag] = childText(c);
-    }
-  }
-
-  // Initialize 12 NOT_STARTED placeholders.
+  // Initialize 12 NOT_STARTED placeholders. Slots not covered by an
+  // <EXERCISE> block (or covered by one with no INDEX) stay as-is.
   const exercises: ExerciseSnapshot[] = [];
   for (let n = 0; n < MAX_EXERCISES; n++) {
     exercises.push({
@@ -230,55 +217,18 @@ export function parseFitTestStatus(rawXml: string): FitTestStatus {
     });
   }
 
-  // Walk per-exercise blocks. Each INDEX marker begins a block; subsequent
-  // NAME / FITFACTOR / STATUS / EXCLUDE siblings (until the next INDEX or
-  // end-of-FITTEST) belong to it.
-  if (firstIndexAt >= 0) {
-    let currentIdx: number | null = null;
-    let currentBlock: Partial<ExerciseSnapshot> = {};
-    const flushBlock = () => {
-      if (currentIdx === null) return;
-      const pos = currentIdx;
-      if (pos >= 0 && pos < MAX_EXERCISES) {
-        exercises[pos] = {
-          index: pos,
-          name: currentBlock.name ?? '',
-          fitFactor: currentBlock.fitFactor ?? null,
-          status: currentBlock.status ?? 'NOT_STARTED',
-          excluded: currentBlock.excluded ?? false,
-        };
-      }
-      currentIdx = null;
-      currentBlock = {};
-    };
-
-    for (let i = firstIndexAt; i < fittestChildren.length; i++) {
-      const c = fittestChildren[i];
-      const tag = tagNameOf(c);
-      if (tag === null) continue;
-      const text = childText(c);
-      if (tag === 'INDEX') {
-        flushBlock();
-        const parsed = Number.parseInt(text, 10);
-        currentIdx = Number.isFinite(parsed) ? parsed : null;
-      } else if (tag === 'NAME') {
-        currentBlock.name = text;
-      } else if (tag === 'FITFACTOR') {
-        if (text === '') {
-          currentBlock.fitFactor = null;
-        } else {
-          const n = Number.parseFloat(text);
-          currentBlock.fitFactor = Number.isFinite(n) ? n : null;
-        }
-      } else if (tag === 'STATUS') {
-        const u = text.toUpperCase();
-        currentBlock.status = isExerciseStatus(u) ? u : 'NOT_STARTED';
-      } else if (tag === 'EXCLUDE') {
-        currentBlock.excluded = parseBool(text);
-      }
-      // Other tags inside the per-exercise region are ignored.
+  // Single pass: every direct child of <FITTEST> is either a top-level
+  // scalar or an <EXERCISE> wrapper. Recurse into the latter to extract
+  // its INDEX/NAME/FITFACTOR/STATUS/EXCLUDE children.
+  const topLevel: Record<string, string> = {};
+  for (const c of fittestChildren) {
+    const tag = tagNameOf(c);
+    if (tag === null) continue;
+    if (tag === 'EXERCISE') {
+      parseExerciseBlock((c as OrderedNode).EXERCISE as OrderedChild[], exercises);
+    } else {
+      topLevel[tag] = childText(c);
     }
-    flushBlock();
   }
 
   const s = (k: string): string => topLevel[k] ?? '';
@@ -323,7 +273,27 @@ export function parseFitTestStatus(rawXml: string): FitTestStatus {
   if (ambStat) status.ambConcStatus = ambStat;
   const maskStat = normalizeConcStatus(s('MASK_CONC_STATUS'));
   if (maskStat) status.maskConcStatus = maskStat;
+
+  // The device never sends per-exercise STATUS=TESTING. The currently
+  // running exercise stays at IDLE (which we collapse to NOT_STARTED)
+  // until it transitions directly to PASS/FAIL. Identify it via the
+  // top-level phase + EXERCISE_NUMBER and promote it ourselves so the UI
+  // can highlight the active row.
+  if (!status.done && isActivePhase(status.status)) {
+    const cur = status.exerciseNumber;
+    if (cur >= 0 && cur < MAX_EXERCISES && exercises[cur].status === 'NOT_STARTED') {
+      exercises[cur] = { ...exercises[cur], status: 'TESTING' };
+    }
+  }
   return status;
+}
+
+/** True when the top-level FITTEST/STATUS names a phase the device runs
+ *  during an active test (ambient or mask purge/sample). `IDLE` and the
+ *  absent case are not active. */
+function isActivePhase(s: string | undefined): boolean {
+  if (!s) return false;
+  return s !== 'IDLE';
 }
 
 /**
@@ -435,10 +405,56 @@ function normalizeConcStatus(s: string): 'PASS' | 'FAIL' | 'TESTING' | undefined
   return u === 'PASS' || u === 'FAIL' || u === 'TESTING' ? u : undefined;
 }
 
-function isExerciseStatus(s: string): s is ExerciseStatus {
-  return s === 'NOT_STARTED' || s === 'TESTING' || s === 'PASS' || s === 'FAIL' || s === 'EXCLUDED';
+/** Normalize a per-exercise STATUS string from the device. The real
+ *  8030 uses `IDLE` for slots that haven't run yet (not `NOT_STARTED`),
+ *  so we collapse `IDLE` and the empty string into `NOT_STARTED`. */
+function normalizeExerciseStatus(s: string): ExerciseStatus {
+  if (s === '' || s === 'IDLE' || s === 'NOT_STARTED') return 'NOT_STARTED';
+  if (s === 'TESTING' || s === 'PASS' || s === 'FAIL' || s === 'EXCLUDED') return s;
+  return 'NOT_STARTED';
 }
 
-function isTerminalExerciseStatus(s: ExerciseStatus): s is Exclude<ExerciseStatus, 'NOT_STARTED' | 'TESTING'> {
+/** Parse one `<EXERCISE>` wrapper's children into the snapshot slot
+ *  named by its `<INDEX>`. Blocks without a valid INDEX, or with an
+ *  INDEX outside [0, MAX_EXERCISES), are ignored. */
+function parseExerciseBlock(
+  children: OrderedChild[],
+  exercises: ExerciseSnapshot[],
+): void {
+  const block: Partial<ExerciseSnapshot> = {};
+  let parsedIdx: number | null = null;
+  for (const k of children) {
+    const tag = tagNameOf(k);
+    if (tag === null) continue;
+    const text = childText(k);
+    if (tag === 'INDEX') {
+      const n = Number.parseInt(text, 10);
+      parsedIdx = Number.isFinite(n) ? n : null;
+    } else if (tag === 'NAME') {
+      block.name = text;
+    } else if (tag === 'FITFACTOR') {
+      if (text === '') {
+        block.fitFactor = null;
+      } else {
+        const n = Number.parseFloat(text);
+        block.fitFactor = Number.isFinite(n) ? n : null;
+      }
+    } else if (tag === 'STATUS') {
+      block.status = normalizeExerciseStatus(text.toUpperCase());
+    } else if (tag === 'EXCLUDE') {
+      block.excluded = parseBool(text);
+    }
+  }
+  if (parsedIdx === null || parsedIdx < 0 || parsedIdx >= MAX_EXERCISES) return;
+  exercises[parsedIdx] = {
+    index: parsedIdx,
+    name: block.name ?? '',
+    fitFactor: block.fitFactor ?? null,
+    status: block.status ?? 'NOT_STARTED',
+    excluded: block.excluded ?? false,
+  };
+}
+
+function isTerminalExerciseStatus(s: ExerciseStatus): s is Exclude<ExerciseStatus, 'NOT_STARTED' | 'TESTING' | 'COMPUTING'> {
   return s === 'PASS' || s === 'FAIL' || s === 'EXCLUDED';
 }

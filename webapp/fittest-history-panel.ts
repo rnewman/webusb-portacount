@@ -17,6 +17,7 @@ import type {
   FitTestMask,
   FitTestPerson,
   FitTestProtocolDef,
+  FitTestStatus,
 } from 'webusb-portacount';
 
 import type {
@@ -177,6 +178,10 @@ function phaseAverage(
 export interface ActiveFitTestHandle {
   /** Append a sample to the live placeholder card and re-paint its chart. */
   appendSample(s: FitTestSampleRecord): void;
+  /** Repaint the placeholder card's exercise list from the latest device
+   *  snapshot. Without this the rows stay frozen at the initial render
+   *  (NOT_STARTED) until {@link finalize}. */
+  updateStatus(status: FitTestStatus): void;
   /** Replace the placeholder with the finalized card. */
   finalize(testId: number): Promise<void>;
 }
@@ -212,6 +217,9 @@ export class FitTestHistoryPanel {
       appendSample: (s) => {
         liveSamples.push(s);
         paintFittestChart(placeholder, liveSamples);
+      },
+      updateStatus: (status) => {
+        paintLiveExerciseList(placeholder, status, meta);
       },
       finalize: async (testId: number) => {
         const tests = await this.store.listTests();
@@ -447,11 +455,57 @@ function pillLabel(status: 'PASS' | 'FAIL' | undefined, aborted?: string): strin
   if (aborted) return 'ABORTED';
   return status ?? '—';
 }
+/** Repaint the placeholder card's exercise rows from a live device
+ *  snapshot. Protocol drives the row set (so excluded slots and the
+ *  test's exercise count stay authoritative); per-row state comes from
+ *  `status.exercises[i]`. */
+function paintLiveExerciseList(
+  card: HTMLElement,
+  status: FitTestStatus,
+  meta: FitTestRecord,
+): void {
+  const exList = card.querySelector('.ftc-exlist') as HTMLElement | null;
+  if (!exList) return;
+  const protocolExercises = meta.protocol.exercises ?? [];
+  type RowSpec = { idx: number; name: string; ff: number | null; status: string };
+  const specs: RowSpec[] = [];
+  for (let i = 0; i < protocolExercises.length; i++) {
+    const pe = protocolExercises[i];
+    const sn = status.exercises[i];
+    const name = (sn?.name || pe.name || '').trim();
+    const ff = sn?.fitFactor ?? null;
+    const rowStatus = pe.excluded ? 'EXCLUDED' : (sn?.status ?? 'NOT_STARTED');
+    specs.push({ idx: i, name, ff, status: rowStatus });
+  }
+  // Skip the rebuild if nothing visible changed — keeps any CSS-animated
+  // pill (e.g. .pill.computing) from restarting on every poll.
+  const key = specs.map((r) => `${r.idx}|${r.name}|${r.status}|${r.ff ?? ''}`).join('\n');
+  const cache = card as HTMLElement & { __ftcExKey?: string };
+  if (cache.__ftcExKey === key) return;
+  cache.__ftcExKey = key;
+  const rows = specs.map((r) => {
+    const row = document.createElement('div');
+    row.className = 'fittest-exrow';
+    const nameEl = document.createElement('span');
+    nameEl.textContent = `${r.idx + 1}. ${r.name || '(unnamed)'}`;
+    const ffEl = document.createElement('span');
+    ffEl.className = 'ff';
+    ffEl.textContent = r.ff !== null ? r.ff.toFixed(1) : '—';
+    const pill = document.createElement('span');
+    pill.className = `pill ${exPillClass(r.status)}`;
+    pill.textContent = r.status;
+    row.append(nameEl, ffEl, pill);
+    return row;
+  });
+  exList.replaceChildren(...rows);
+}
+
 function exPillClass(s: string): string {
   switch (s) {
     case 'PASS': return 'pass';
     case 'FAIL': return 'fail';
     case 'TESTING': return 'testing';
+    case 'COMPUTING': return 'computing';
     case 'EXCLUDED': return 'excluded';
     default: return 'not-started';
   }
