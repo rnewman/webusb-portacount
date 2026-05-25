@@ -17,6 +17,17 @@ main {
   margin: 0 auto;
 }
 
+.git-sha {
+  position: fixed;
+  right: 0.5rem;
+  bottom: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: #5a5a78;
+  user-select: all;
+  pointer-events: auto;
+}
+
 .cols {
   display: grid;
   grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
