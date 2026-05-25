@@ -200,7 +200,10 @@ export class Portacount {
   private closingPromise: Promise<void> | null = null;
   private keepAliveHandle: ReturnType<typeof setInterval> | null = null;
   private logFn: (msg: string) => void;
-  private trace: PortacountTrace;
+  /** All currently-registered XML trace subscribers. The constructor's
+   * `trace` option is the first entry; additional subscribers (e.g. a
+   * fit-test debug capture) attach via {@link addXmlTrace}. */
+  private traceSubscribers: PortacountTrace[] = [];
   /** Tail of the command-serialization chain. New commands chain onto this
    * so concurrent callers (poll + keepalive at overlapping intervals) queue
    * instead of racing the single-exchange invariant. */
@@ -213,7 +216,7 @@ export class Portacount {
   ) {
     this.stack = stack;
     this.logFn = logFn;
-    this.trace = trace;
+    if (trace.onTx || trace.onRx) this.traceSubscribers.push(trace);
     this.stack.setTcpHandlers({
       onConnected: () => this.onTcpConnected(),
       onData: (data) => this.onTcpData(data),
@@ -297,10 +300,10 @@ export class Portacount {
         throw new Error(`command: not connected (state=${this.state})`);
       }
       const payload = utf8.encode(xml + CMD_TERMINATOR);
-      this.trace.onTx?.(xml);
+      for (const s of this.traceSubscribers) s.onTx?.(xml);
       const raw = await this.exchange(payload, timeoutMs);
       const text = new TextDecoder('utf-8', { fatal: false }).decode(trimTrailingNulls(raw));
-      this.trace.onRx?.(text);
+      for (const s of this.traceSubscribers) s.onRx?.(text);
       return text;
     };
     const result = this.commandTail.then(run, run);
@@ -308,6 +311,19 @@ export class Portacount {
     // the original `result` still rejects for the caller.
     this.commandTail = result.catch(() => undefined);
     return result;
+  }
+
+  /**
+   * Register an XML traffic subscriber. Returns an unsubscribe function.
+   * Multiple subscribers can coexist (the existing constructor `trace`
+   * option and ad-hoc taps like a fit-test debug capture).
+   */
+  addXmlTrace(handler: PortacountTrace): () => void {
+    this.traceSubscribers.push(handler);
+    return () => {
+      const i = this.traceSubscribers.indexOf(handler);
+      if (i >= 0) this.traceSubscribers.splice(i, 1);
+    };
   }
 
   /**

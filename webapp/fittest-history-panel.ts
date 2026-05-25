@@ -440,7 +440,7 @@ function protocolName(p: FitTestProtocolDef): string {
   return withDisplay.displayName || p.name;
 }
 
-function personLabel(p: FitTestPerson): string {
+export function personLabel(p: FitTestPerson): string {
   const parts = [p.firstName, p.lastName].filter((s) => s && s.trim().length > 0);
   return parts.join(' ');
 }
@@ -603,7 +603,7 @@ function csvField(v: unknown): string {
   return s;
 }
 
-function downloadBlob(content: string | Blob, filename: string, type: string): void {
+export function downloadBlob(content: string | Blob, filename: string, type: string): void {
   const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

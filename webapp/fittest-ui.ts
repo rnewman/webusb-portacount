@@ -16,7 +16,12 @@ import {
 import { DEFAULT_PROTOCOLS, type NamedProtocol } from './fittest-defaults';
 import { FitTestPanel } from './fittest-panel';
 import type { FitTestStore } from './fittest-store';
-import type { ActiveFitTestHandle, FitTestHistoryPanel } from './fittest-history-panel';
+import {
+  downloadBlob,
+  personLabel,
+  type ActiveFitTestHandle,
+  type FitTestHistoryPanel,
+} from './fittest-history-panel';
 
 export interface FitTestUiCallbacks {
   log: (msg: string) => void;
@@ -30,6 +35,11 @@ interface ActiveRun {
   testId: number;
   runner: FitTestRunner;
   historyHandle: ActiveFitTestHandle | null;
+}
+
+interface DebugCapture {
+  record: (kind: string, payload: Record<string, unknown>) => void;
+  finalize: () => void;
 }
 
 export class FitTestUi {
@@ -55,6 +65,7 @@ export class FitTestUi {
   private operator: HTMLInputElement;
   private notes: HTMLTextAreaElement;
   private endOnUnachievable: HTMLInputElement;
+  private debugCapture: HTMLInputElement;
 
   constructor(tabRoot: HTMLElement, panelRoot: HTMLElement, cb: FitTestUiCallbacks) {
     this.cb = cb;
@@ -83,6 +94,7 @@ export class FitTestUi {
     this.endOnUnachievable = required<HTMLInputElement>(tabRoot, '#ft-end-on-unachievable');
     this.startBtn = required<HTMLButtonElement>(tabRoot, '#ft-start-btn');
     this.abortBtn = required<HTMLButtonElement>(tabRoot, '#ft-abort-btn');
+    this.debugCapture = required<HTMLInputElement>(tabRoot, '#ft-debug-capture');
 
     this.startBtn.addEventListener('click', () => {
       void this.startTest();
@@ -242,10 +254,15 @@ export class FitTestUi {
       }
     }
 
+    const debug = this.debugCapture.checked
+      ? this.openDebugCapture({ person, mask, protocol, start, chosen })
+      : null;
+
     const runner = new FitTestRunner(this.pc, {
       onStatusUpdate: (s) => {
         this.panel.update(s, { protocolName: chosen.displayName });
         historyHandle?.updateStatus(s);
+        debug?.record('status', { status: s });
       },
       onSample: (s) => {
         const sample = {
@@ -269,6 +286,7 @@ export class FitTestUi {
       },
       onExerciseCompleted: (r) => {
         this.cb.log(`[ex ${r.index + 1}] ${r.name} FF=${r.fitFactor ?? 'n/a'} ${r.status}`);
+        debug?.record('exercise-completed', { exercise: r });
       },
       onOverallResult: (ff, status) => {
         this.cb.log(`Fit test result: FF=${ff ?? 'n/a'} ${status}`);
@@ -290,21 +308,67 @@ export class FitTestUi {
           exercises: result.exercises,
         });
       }
+      debug?.record('run-end', { ok: true, result });
     } catch (err) {
       this.cb.log(`fit test failed: ${(err as Error).message}`);
       if (this.store && testId > 0) {
         await this.store.endTest(testId, Date.now(), undefined, (err as Error).message);
       }
+      debug?.record('run-end', { ok: false, error: (err as Error).message });
     } finally {
       if (historyHandle && testId > 0) {
         try { await historyHandle.finalize(testId); } catch (err) {
           this.cb.log(`fit test: history finalize: ${(err as Error).message}`);
         }
       }
+      debug?.finalize();
       this.active = null;
       this.cb.onTestEnded();
       this.setFormEnabled(this.pc !== null);
     }
+  }
+
+  /** Open a per-run debug capture. Returns a handle whose `record()` is
+   *  called from the runner callbacks; `finalize()` unsubscribes the
+   *  wire tap and downloads the JSONL. */
+  private openDebugCapture(meta: {
+    person: FitTestPerson;
+    mask: FitTestMask;
+    protocol: FitTestProtocolDef;
+    start: FitTestStartOptions;
+    chosen: NamedProtocol;
+  }): DebugCapture {
+    const t0 = Date.now();
+    const events: string[] = [];
+    const record = (kind: string, payload: Record<string, unknown>): void => {
+      events.push(JSON.stringify({ t: Date.now() - t0, kind, ...payload }));
+    };
+    record('run-meta', {
+      startedAt: new Date(t0).toISOString(),
+      device: this.deviceInfo ? {
+        serialNumber: this.deviceInfo.serialNumber,
+        modelNumber: this.deviceInfo.modelNumber,
+        buildString: this.deviceInfo.buildString,
+      } : null,
+      person: meta.person,
+      mask: meta.mask,
+      protocol: { ...meta.protocol, displayName: meta.chosen.displayName },
+      start: meta.start,
+    });
+    const unsubscribe = this.pc?.addXmlTrace({
+      onTx: (xml) => record('tx', { xml }),
+      onRx: (xml) => record('rx', { xml }),
+    }) ?? (() => {});
+    return {
+      record,
+      finalize: () => {
+        unsubscribe();
+        const body = events.join('\n') + '\n';
+        const who = personLabel(meta.person) || 'unlabeled';
+        const ts = new Date(t0).toISOString().replace(/[:T]/g, '-').slice(0, 19);
+        downloadBlob(body, `fittest-debug_${who}_${ts}.jsonl`, 'application/x-ndjson');
+      },
+    };
   }
 
   private async abortTest(): Promise<void> {
