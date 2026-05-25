@@ -41,7 +41,7 @@
   "scripts": {
     "build:wasm": "./scripts/build-wasm.sh",
     "build:lib": "tsc -p tsconfig.build.json && node scripts/copy-wasm.mjs",
-    "build:webapp": "npm run build --workspace webapp",
+    "build:webapp": "npm run build --workspace webapp --",
     "build": "npm run build:wasm && npm run build:lib && npm run build:webapp",
     "dev": "npm run dev --workspace webapp",
     "prewatch": "node scripts/copy-wasm.mjs",
