@@ -14,6 +14,7 @@ import { SessionPanel, type ActiveCardHandle } from './session-panel';
 import { openFitTestStore, type FitTestStore } from './fittest-store';
 import { FitTestUi } from './fittest-ui';
 import { FitTestHistoryPanel } from './fittest-history-panel';
+import { mount8020Panel } from './main-8020';
 
 const DHCP_TIMEOUT_MS = 15000;
 const POLL_INTERVAL_MS = 1000;
@@ -92,6 +93,13 @@ void (async () => {
     log(`session store init failed: ${(err as Error).message}`);
   }
 })();
+
+// Mount the 8020 (serial) panel. Self-contained — owns its own client,
+// transport, runner, and result list. Coexists with the 8030 flow above.
+{
+  const host = document.getElementById('pc8020-host');
+  if (host) mount8020Panel(host as HTMLElement);
+}
 
 // Initialize the fit-test UI. Construct it eagerly so DOM bindings settle
 // before the user can possibly click; wire the store in once it opens.

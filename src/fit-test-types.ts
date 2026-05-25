@@ -148,13 +148,20 @@ export interface ExerciseResult {
 
 /** Returned by {@link FitTestRunner.run} on success. */
 export interface FitTestResult {
+  /** Discriminator for storage and shared UI code. The 8030 runner
+   * always sets `'8030'`; the 8020 runner produces its own
+   * `FitTestResult8020` and is normalized into this shape with
+   * `deviceModel: '8020'` and the 8030-specific fields left undefined. */
+  deviceModel?: '8020' | '8030';
   ffOverall: number | null;
   ffOverallStatus?: 'PASS' | 'FAIL';
   exercises: ExerciseResult[];
   /** Absent on success. */
   error?: string;
-  /** The snapshot that produced DONE/IDLE — useful for diagnostics. */
-  lastStatus: FitTestStatus;
+  /** The snapshot that produced DONE/IDLE — useful for diagnostics.
+   * Absent for 8020 results: the 8020 has no equivalent FITTEST/ALL
+   * snapshot. */
+  lastStatus?: FitTestStatus;
 }
 
 /** Tagged reason for an aborted run. */
