@@ -139,6 +139,7 @@ source ./emsdk/emsdk_env.sh
 npm install
 
 # Build the lwIP Wasm module.
+# `npm run build` will run all three steps.
 npm run build:wasm
 
 # Build the library.
