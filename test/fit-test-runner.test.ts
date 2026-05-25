@@ -542,7 +542,7 @@ describe('FitTestRunner: treatIdleAsDone guard', () => {
     });
     await vi.runAllTimersAsync();
     const result = await p;
-    expect(result.lastStatus.status).toBe('IDLE');
+    expect(result.lastStatus?.status).toBe('IDLE');
     // We polled at least 4 times — meaning the initial IDLE didn't end the run.
     expect(stub.commands.filter((c) => c.includes('<FITTEST><ALL/>')).length).toBeGreaterThanOrEqual(3);
   });

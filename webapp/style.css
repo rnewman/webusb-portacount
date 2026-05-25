@@ -207,6 +207,104 @@ main {
   .sampling-readings { grid-template-columns: 1fr; }
 }
 
+/* ----- 8020 tab (provisional — frontend will be rebased) ----- */
+
+.pc8020-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pc8020-controls {
+  background: #12121e;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+
+.pc8020-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.pc8020-controls .pc8020-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pc8020-readings {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem 0.75rem;
+  background: #12121e;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.pc8020-readings > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px dashed #1f1f2e;
+}
+
+.pc8020-readings .label {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.pc8020-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pc8020-runner ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.pc8020-runner ul li {
+  padding: 0.15rem 0.4rem;
+  border-bottom: 1px solid #1a1a2a;
+}
+
+.pc8020-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.pc8020-log .event-log {
+  max-height: 16rem;
+  overflow-y: auto;
+  background: #0a0a14;
+  border: 1px solid #2a2a3e;
+  border-radius: 4px;
+  padding: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 700px) {
+  .pc8020-controls { grid-template-columns: 1fr; }
+  .pc8020-readings { grid-template-columns: 1fr; }
+}
+
 /* ----- Test Runs tab ----- */
 
 /* Primary fit-test fields — Name + Mask above the fold. */
