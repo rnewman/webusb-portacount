@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <h1>Portacount 8030 fit test</h1>
+    <h1>Portacount fit test</h1>
 
     <section id="connection-pill" class="conn-pill disconnected">
       <div class="conn-row">
@@ -18,6 +18,11 @@
           <span class="conn-summary" id="conn-summary">Not connected</span>
         </div>
         <div class="conn-actions">
+          <div class="device-picker" role="radiogroup" aria-label="Device">
+            <button type="button" class="device-opt active" data-device="8030-usb" role="radio" aria-checked="true">8030</button>
+            <button type="button" class="device-opt" data-device="8020-serial" role="radio" aria-checked="false">8020</button>
+            <button type="button" class="device-opt" data-device="8020-sim" role="radio" aria-checked="false">Simulator</button>
+          </div>
           <button id="connect-btn">Connect</button>
           <button id="disconnect-btn" disabled>Disconnect</button>
         </div>
@@ -57,13 +62,13 @@
       </div>
 
       <div class="right-col">
-        <div class="tabs" role="tablist">
+        <div class="tabs" role="tablist" data-device-tabs="8030">
           <button class="tab active" role="tab" data-tab="testruns" aria-selected="true">Test Runs</button>
           <button class="tab" role="tab" data-tab="sampling" aria-selected="false">Sampling</button>
-          <button class="tab" role="tab" data-tab="pc8020" aria-selected="false">8020 (serial)</button>
         </div>
+        <section id="pc8020-host" data-device-panel="8020" hidden></section>
 
-        <section class="tab-panel" data-tab-panel="sampling" hidden>
+        <section class="tab-panel" data-tab-panel="sampling" data-device-panel="8030" hidden>
           <div id="sampling-controls" class="sampling-controls">
             <div class="sampling-actions">
               <button id="start-btn" disabled>Start sampling</button>
@@ -82,7 +87,7 @@
           <div id="session-list"></div>
         </section>
 
-        <section class="tab-panel active" data-tab-panel="testruns">
+        <section class="tab-panel active" data-tab-panel="testruns" data-device-panel="8030">
           <div id="fittest-form" class="fittest-form">
             <div class="row primary">
               <label for="ft-name">Name</label>
@@ -150,9 +155,6 @@
           <div id="fittest-list"></div>
         </section>
 
-        <section class="tab-panel" data-tab-panel="pc8020" hidden>
-          <div id="pc8020-host"></div>
-        </section>
       </div>
     </div>
   </main>

@@ -90,6 +90,18 @@ export type {
   ExerciseResult8020,
   AmbientMaskSample,
 } from './8020/fit-test-runner';
+export {
+  runHostDrivenFitTest,
+  FitTestAbortedError8020,
+  DEFAULT_CYCLE,
+} from './8020/host-driven-fit-test';
+export type {
+  HostDrivenFitTestOptions,
+  HostDrivenFitTestCallbacks,
+  FitTestPhase8020,
+  FitTestPhaseInfo,
+  FitTestSample,
+} from './8020/host-driven-fit-test';
 export { WebSerialByteStream } from './serial/web-serial';
 export type { WebSerialByteStreamOptions, WebSerialPortLike, WebSerialOpenParams } from './serial/web-serial';
 export { WebSocketByteStream } from './serial/web-socket';

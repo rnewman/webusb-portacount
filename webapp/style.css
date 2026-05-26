@@ -114,6 +114,42 @@ main {
 .conn-actions {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+/* Segmented device picker. */
+.device-picker {
+  display: inline-flex;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-right: 0.5rem;
+}
+
+.device-picker .device-opt {
+  background: #12121e;
+  color: #aaa;
+  border: 0;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  border-right: 1px solid #2a2a3e;
+  min-width: 5em;
+}
+
+.device-picker .device-opt:last-child {
+  border-right: 0;
+}
+
+.device-picker .device-opt:hover:not(.active) {
+  background: #1a1a2a;
+  color: #ddd;
+}
+
+.device-picker .device-opt.active {
+  background: #2a2a3e;
+  color: #fff;
+  font-weight: 500;
 }
 
 .conn-details {

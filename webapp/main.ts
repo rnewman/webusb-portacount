@@ -14,7 +14,7 @@ import { SessionPanel, type ActiveCardHandle } from './session-panel';
 import { openFitTestStore, type FitTestStore } from './fittest-store';
 import { FitTestUi } from './fittest-ui';
 import { FitTestHistoryPanel } from './fittest-history-panel';
-import { mount8020Panel } from './main-8020';
+import { mount8020Panel, type Pc8020Controller, type TransportKind } from './main-8020';
 
 const DHCP_TIMEOUT_MS = 15000;
 const POLL_INTERVAL_MS = 1000;
@@ -94,12 +94,62 @@ void (async () => {
   }
 })();
 
-// Mount the 8020 (serial) panel. Self-contained — owns its own client,
-// transport, runner, and result list. Coexists with the 8030 flow above.
+// ----- Device picker (top connection pill) -----
+//
+// Single Connect button drives the right transport based on which
+// device segment is selected. The 8020 panel exposes a controller;
+// the 8030 path uses the existing connect()/disconnect() below.
+
+type DeviceMode = '8030-usb' | '8020-serial' | '8020-sim';
+let deviceMode: DeviceMode = '8030-usb';
+let pc8020: Pc8020Controller | null = null;
+
 {
   const host = document.getElementById('pc8020-host');
-  if (host) mount8020Panel(host as HTMLElement);
+  if (host) pc8020 = mount8020Panel(host as HTMLElement);
 }
+
+// Pipe the 8020 panel's log into the main Event Log.
+pc8020?.onLog((msg) => log(`[8020] ${msg}`));
+
+// Segmented picker buttons.
+const devicePickerEls = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('.device-opt'),
+);
+function setDeviceMode(next: DeviceMode): void {
+  if (next === deviceMode && devicePickerEls.some((b) => b.classList.contains('active'))) {
+    return;
+  }
+  deviceMode = next;
+  for (const btn of devicePickerEls) {
+    const on = (btn.dataset.device as DeviceMode) === next;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', String(on));
+  }
+  // Hide/show device-specific panels.
+  for (const el of document.querySelectorAll<HTMLElement>('[data-device-panel]')) {
+    const showFor = el.dataset.devicePanel;
+    el.hidden = !(
+      (next === '8030-usb' && showFor === '8030') ||
+      ((next === '8020-serial' || next === '8020-sim') && showFor === '8020')
+    );
+  }
+  // Hide/show the tab bar — only the 8030 has multiple tabs.
+  for (const el of document.querySelectorAll<HTMLElement>('[data-device-tabs]')) {
+    el.hidden = el.dataset.deviceTabs !== '8030' || next !== '8030-usb';
+  }
+}
+for (const btn of devicePickerEls) {
+  btn.addEventListener('click', () => {
+    if (session || pc8020?.connection === 'ready' || pc8020?.connection === 'connecting') {
+      log('cannot switch device while connected — disconnect first.');
+      return;
+    }
+    setDeviceMode(btn.dataset.device as DeviceMode);
+  });
+}
+// Initialize visibility on load (defaults to 8030).
+setDeviceMode(deviceMode);
 
 // Initialize the fit-test UI. Construct it eagerly so DOM bindings settle
 // before the user can possibly click; wire the store in once it opens.
@@ -230,7 +280,11 @@ function isNonZero(ip: IpOctets): boolean {
 
 connectBtn.addEventListener('click', () => {
   connectBtn.disabled = true;
-  connect().catch((err) => {
+  const runner =
+    deviceMode === '8030-usb'
+      ? connect()
+      : connect8020(deviceMode === '8020-sim' ? 'simulator' : 'serial');
+  runner.catch((err) => {
     log(`FATAL: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);
     connectBtn.disabled = false;
@@ -242,8 +296,30 @@ disconnectBtn.addEventListener('click', () => {
   disconnectBtn.disabled = true;
   startBtn.disabled = true;
   stopBtn.disabled = true;
-  disconnect().catch((err) => log(`disconnect: ${(err as Error).message}`));
+  if (deviceMode === '8030-usb') {
+    disconnect().catch((err) => log(`disconnect: ${(err as Error).message}`));
+  } else {
+    disconnect8020().catch((err) => log(`disconnect (8020): ${(err as Error).message}`));
+  }
 });
+
+async function connect8020(transport: TransportKind): Promise<void> {
+  if (!pc8020) throw new Error('8020 panel not mounted');
+  setConnState('connecting', `Connecting to 8020 (${transport})…`);
+  await pc8020.connect({ transport });
+  setConnState('connected', `PortaCount 8020 (${transport})`);
+  disconnectBtn.disabled = false;
+  // 8020 has no concept of the 8030's USB/RNDIS/DHCP/handshake
+  // status grid; collapse the details and clear stale 8030 fields.
+  connDetails.open = false;
+}
+
+async function disconnect8020(): Promise<void> {
+  if (!pc8020) return;
+  await pc8020.disconnect();
+  connectBtn.disabled = false;
+  setConnState('disconnected', 'Not connected');
+}
 
 startBtn.addEventListener('click', () => {
   if (!session) return;
@@ -269,6 +345,9 @@ stopBtn.addEventListener('click', () => {
 window.addEventListener('pagehide', () => {
   if (session) {
     void disconnect();
+  }
+  if (pc8020 && pc8020.connection !== 'idle' && pc8020.connection !== 'closed') {
+    void pc8020.disconnect();
   }
 });
 
