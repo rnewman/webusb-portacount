@@ -324,6 +324,75 @@ have not tested.
 Our `Portacount8020.connect()` sync uses the same shape minus the
 beeps and the `C` voltage poll; both are easy to add as opt-ins.
 
+## Host-driven fit test
+
+✅ V2.5, 2026-05-25, verified end-to-end (real fit on a 3M half-mask
+APR with alcohol nebulizer, FF ≈ 185 on first exercise).
+
+The 8020 **has no "start test" command**, and once in external
+control (`J`), the device's physical buttons are locked out and its
+screen blanks. So a host-driven test is the *only* way to drive a
+test under external control — the host fully orchestrates valve
+position and timing; the device just streams particle counts at 1 Hz.
+
+### Canonical cycle (per exercise)
+
+```
+host                       device
+  │  VN                       │     valve → ambient
+  │ ───────────────────────►  │
+  │  …ambient purge (4 s)…    │     discard samples
+  │  …ambient sample (5 s)…   │     ◄── 5× nnnnnn.nn   collect → ambBucket
+  │  VF                       │     valve → mask
+  │ ───────────────────────►  │
+  │  …mask purge (11 s)…      │     discard samples
+  │  …mask sample (40 s)…     │     ◄── 40× nnnnnn.nn  collect → maskBucket
+```
+
+Per-exercise FF = `mean(ambBucket) / mean(maskBucket)`. Overall FF
+across exercises = harmonic mean of per-exercise FFs (OSHA
+convention).
+
+Defaults match the device's own configured timings (visible in the
+`S` burst as `STPA / STA / STPM / STMnn`). The probe at
+`scripts/probe-8020-fittest.ts` reads those or accepts overrides.
+
+### Required setup before driving
+
+1. `J` — invoke external control (must succeed, must wait for `OK`
+   or `EJ`).
+2. `ZE` — enable continuous data transmission. Without `ZE` the
+   device may or may not emit particle counts (the wire-protocol
+   doc is unclear; on V2.5 we observed counts streaming without
+   explicit `ZE` after a prior session set it, so do not depend on
+   `ZE`-off meaning "silent").
+3. `VN` — leave the valve on ambient initially as a known starting
+   state.
+
+### Measured behavior on real hardware
+
+- Particle count cadence is exactly **1 Hz**, ±~10 ms jitter. So
+  N seconds of sampling produces N samples (give or take one).
+- Valve switching (`VN`/`VF`) acks within ~50 ms but the *physical*
+  valve transition adds the "purge" delay — that's why the purge
+  phases exist before sampling.
+- A real mask seal gave **mean mask 1.82 #/cc** against **mean
+  ambient 336.6 #/cc** = FF ≈ 185 (PASS at level 100).
+- An open (no-mask) configuration would put both sides at the same
+  ambient level → FF ≈ 1 → FAIL. Worth using as a sanity check.
+
+### Why not observer-style?
+
+Earlier sketch had a `FitTestRunner8020` that watched the line stream
+for `NEW TEST PASS = N`, `FF n value`, `Overall FF` events. Those
+events *do* arrive on the wire — but only when the device is in
+**internal** control (i.e. user pressing physical buttons). Under
+external control they never fire, because the device is no longer
+the test orchestrator. Both modes are valid; the host-driven runner
+is what the webapp uses for remote / unattended tests, and the
+observer-style code can remain available for the future "let the
+user start the test on the device" path.
+
 ## Other observations (not yet integrated into the protocol model)
 
 - **NUL-byte bursts on idle.** ✅ observed V2.5, 2026-05-25. The
