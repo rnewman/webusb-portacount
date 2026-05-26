@@ -109,8 +109,17 @@ export function mount8020Panel(root: HTMLElement): void {
       client.onLine((line) => log(`< ${line}`));
 
       log(`connecting via ${stream.info?.label ?? '(unknown)'}…`);
+      // External control is a hard prerequisite for ZE/R/S/etc. on
+      // real hardware — without it the device ignores those commands
+      // and the queue times out. Auto-imply it if the user requested
+      // anything that needs it.
+      const needsExternal =
+        pane.dataTxChk.checked || pane.externalControlChk.checked;
+      if (pane.dataTxChk.checked && !pane.externalControlChk.checked) {
+        log('(auto-enabling external control — required for continuous data)');
+      }
       await client.connect(stream, {
-        enableExternalControl: pane.externalControlChk.checked,
+        enableExternalControl: needsExternal,
         enableDataTransmission: pane.dataTxChk.checked,
         requestRuntimeStatus: true,
         requestSettings: true,

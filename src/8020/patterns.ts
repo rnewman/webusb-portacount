@@ -47,16 +47,18 @@ export const Cmd8020 = Object.freeze({
  * Keyed by the command string sent. Value is a regex that the next
  * inbound line must match to satisfy the command.
  *
- * Multi-line bursts (`C`, `S`) do not have a clean ack line —
- * settings/voltage records simply stream until the device falls
- * silent. The client orchestrates those by collecting matching
- * settings lines on the unsolicited channel and waiting for
- * quiescence, not by routing them through the command queue's
- * single-line ack mechanism. */
+ * Real-device behavior (verified against firmware V2.5, S/N 44960,
+ * 2026-05-25 capture): the multi-line burst commands `S` and `C` do
+ * not echo. The settings / voltage burst begins immediately. We use
+ * the first burst line as the ack so the queue can move on; the
+ * remaining lines arrive on the unsolicited channel and accumulate
+ * via the state reducer. */
 export const COMMAND_ACK_OVERRIDES: Record<string, RegExp> = {
   J: /^(OK|EJ)$/,
   R: /^R[GB][GB]$/,
   Q: /^Q[YN]$/i,
+  S: /^STPA\s+\d+/,
+  C: /^C[SBTCLPD]\S+/,
 };
 
 // ---- response regex table ----

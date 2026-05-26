@@ -206,12 +206,14 @@ class SimDevice {
       return;
     }
     if (cmd === 'C') {
+      // Real device (V2.5) does NOT echo C; it just dumps the
+      // voltage burst directly.
       for (const v of VOLTAGE_BURST) this.send(v);
       return;
     }
     if (cmd === 'S') {
-      // Echo S then dump the settings burst.
-      this.send('S');
+      // Real device (V2.5) does NOT echo S; settings burst starts
+      // immediately with STPA.
       for (const line of SETTINGS_BURST) this.send(line);
       return;
     }

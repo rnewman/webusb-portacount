@@ -157,6 +157,16 @@ export class Portacount8020 {
     this.assembler.reset();
     this.state = emptyState();
     this.banner.reset();
+    // Queues are single-use (close() is terminal). Recreate so a
+    // client instance can be reconnected after a prior failed or
+    // clean teardown.
+    if (this.queue.isClosed) {
+      this.queue = new CommandQueue8020({
+        write: (bytes) => this.writeBytes(bytes),
+        onUnsolicitedLine: (line) => this.handleLine(line),
+        log: this.log,
+      });
+    }
     this.setConnection('connecting');
     stream.onData((chunk) => this.ingestBytes(chunk));
 
@@ -176,24 +186,42 @@ export class Portacount8020 {
         await this.queue.command(Cmd8020.runtimeStatus, cmdOpts);
       }
       if (requestSettings) {
-        // The settings burst is multi-line with no clean terminator.
-        // We don't gate the queue on it — fire `S` and treat the
-        // result as a write-only event; the settings lines arrive on
-        // the unsolicited channel and accumulate via the reducer.
-        // The echo of `S` is the immediate ack.
-        await this.queue
-          .command(Cmd8020.settings, cmdOpts)
-          .catch((err) => {
-            // `S` does not echo on every firmware — log and continue.
-            this.log(`[8020 connect] settings request failed: ${(err as Error).message}`);
-          });
+        // The settings burst is multi-line; the queue's ack pattern
+        // for `S` (see COMMAND_ACK_OVERRIDES) matches the first
+        // burst line (STPA), so the queue moves on while the rest
+        // of the burst arrives on the unsolicited channel and
+        // accumulates via the state reducer.
+        await this.queue.command(Cmd8020.settings, cmdOpts);
       }
     } catch (err) {
-      this.setConnection('idle');
+      // Sync failed — release the byte stream so the port doesn't
+      // stay locked. Without this, the caller can't retry: the OS
+      // will refuse to reopen a port that's still held by a prior
+      // (failed) attempt.
+      await this.cleanupAfterFailedConnect();
       throw err;
     }
 
     this.setConnection('ready');
+  }
+
+  private async cleanupAfterFailedConnect(): Promise<void> {
+    this.queue.close(new Error('connect failed'));
+    const s = this.stream;
+    this.stream = null;
+    if (s) {
+      try {
+        s.onData(null);
+      } catch {
+        /* not all transports support null-detach */
+      }
+      try {
+        await s.close();
+      } catch (err) {
+        this.log(`[8020 connect-cleanup] close error: ${(err as Error).message}`);
+      }
+    }
+    this.setConnection('closed');
   }
 
   /** Send a raw command. Echo-ack and override-pattern matching is
