@@ -104,7 +104,11 @@ export class FitTestUi {
     this.endOnUnachievable = required<HTMLInputElement>(tabRoot, '#ft-end-on-unachievable');
     this.startBtn = required<HTMLButtonElement>(tabRoot, '#ft-start-btn');
     this.abortBtn = required<HTMLButtonElement>(tabRoot, '#ft-abort-btn');
-    this.debugCapture = required<HTMLInputElement>(tabRoot, '#ft-debug-capture');
+    // #ft-debug-capture lives in the debug gutter (outside the tab
+    // panel), so look it up from document rather than tabRoot.
+    const dbg = document.getElementById('ft-debug-capture');
+    if (!dbg) throw new Error('missing #ft-debug-capture in document');
+    this.debugCapture = dbg as HTMLInputElement;
 
     this.startBtn.addEventListener('click', () => {
       void this.startTest();
@@ -222,6 +226,11 @@ export class FitTestUi {
     const haveClient = this.deviceMode === '8030' ? this.pc !== null : this.pc8020 !== null;
     this.startBtn.disabled = !enabled || !haveClient;
     this.abortBtn.disabled = enabled || this.active === null;
+    this.cb.log(
+      `fit test: setFormEnabled(${enabled}) → mode=${this.deviceMode} ` +
+      `pc=${this.pc !== null} pc8020=${this.pc8020 !== null} ` +
+      `startBtn.disabled=${this.startBtn.disabled}`,
+    );
   }
 
   private collectForm(): {
@@ -278,7 +287,16 @@ export class FitTestUi {
   }
 
   private async startTest(): Promise<void> {
-    if (this.active) return;
+    if (this.active) {
+      this.cb.log('fit test: a run is already in progress');
+      return;
+    }
+    const haveClient = this.deviceMode === '8030'
+      ? this.pc !== null
+      : this.pc8020 !== null;
+    this.cb.log(
+      `fit test: Start clicked (mode=${this.deviceMode}, haveClient=${haveClient}, protocol="${this.protocolSelect.value}")`,
+    );
     const collected = this.collectForm();
     if (!collected) return;
     if (this.deviceMode === '8020') {
@@ -456,6 +474,7 @@ export class FitTestUi {
     const completedExercises = new Map<number, { ff: number; status: 'PASS' | 'FAIL' }>();
     let currentPhase: string = 'IDLE';
     let currentExerciseIdx = 0; // 0-based
+    let phaseStartedAt = runStartedAt;
     let lastAmb = 0;
     let lastMask = 0;
     let ambStatus: 'PASS' | 'FAIL' | 'TESTING' | undefined;
@@ -463,6 +482,7 @@ export class FitTestUi {
 
     const buildStatus = (): FitTestStatus => {
       const elapsedSec = (Date.now() - runStartedAt) / 1000;
+      const phaseElapsedSec = (Date.now() - phaseStartedAt) / 1000;
       const exercises: ExerciseSnapshot[] = [];
       for (let i = 0; i < 12; i++) {
         const proto = protocol.exercises[i];
@@ -495,7 +515,7 @@ export class FitTestUi {
         ambConcStatus: ambStatus,
         maskConc: lastMask,
         maskConcStatus: maskStatus,
-        seconds: 0,
+        seconds: Math.round(phaseElapsedSec),
         totalSeconds: Math.round(elapsedSec),
         lowAlcoholWarning: false,
         lowParticleWarning: false,
@@ -538,6 +558,7 @@ export class FitTestUi {
               : info.phase === 'ambient-sample' ? 'AMBIENT_SAMPLE'
               : info.phase === 'mask-purge' ? 'MASK_PURGE'
               : 'MASK_SAMPLE';
+            phaseStartedAt = Date.now();
             ambStatus = info.phase.startsWith('ambient') ? 'TESTING' : undefined;
             maskStatus = info.phase.startsWith('mask') ? 'TESTING' : undefined;
             emitStatus();

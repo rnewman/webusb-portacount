@@ -359,12 +359,30 @@ async function connect8020(transport: 'serial' | 'simulator'): Promise<void> {
   const client = new Portacount8020({ log: (m) => log(`[8020] ${m}`) });
   client.onLine((line) => log(`[8020] < ${line}`));
   log(`connecting via ${stream.info?.label ?? '(unknown)'}…`);
+  // Skip the settings burst inside connect() — we'll request it
+  // explicitly after the short commands, so the long burst doesn't
+  // delay our VN.
   await client.connect(stream, {
     enableExternalControl: true,
     enableDataTransmission: true,
     requestRuntimeStatus: true,
-    requestSettings: true,
+    requestSettings: false,
   });
+  // Normalize the valve to ambient so our sample-source state and
+  // ambient-vs-mask attribution start from a known position. Done
+  // before the settings burst because the burst is ~3 s long and
+  // would block the VN's echo behind it.
+  try {
+    await client.command('VN', { timeoutMs: 2000 });
+  } catch (err) {
+    log(`[8020] couldn't set initial valve (continuing): ${(err as Error).message}`);
+  }
+  // Now pull the settings (long burst, ~3 s end-to-end).
+  try {
+    await client.requestSettings({ timeoutMs: 4000 });
+  } catch (err) {
+    log(`[8020] settings request failed (continuing): ${(err as Error).message}`);
+  }
   log('8020 connected.');
 
   session8020 = { client, stream };
