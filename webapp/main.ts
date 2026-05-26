@@ -3,7 +3,11 @@ import {
   RndisWireLayer,
   Cmd,
   Portacount,
+  Portacount8020,
+  WebSerialByteStream,
+  WebSocketByteStream,
   parseResponse,
+  type ByteStream,
   type IpOctets,
   type DeviceInfo,
 } from 'webusb-portacount';
@@ -14,7 +18,6 @@ import { SessionPanel, type ActiveCardHandle } from './session-panel';
 import { openFitTestStore, type FitTestStore } from './fittest-store';
 import { FitTestUi } from './fittest-ui';
 import { FitTestHistoryPanel } from './fittest-history-panel';
-import { mount8020Panel, type Pc8020Controller, type TransportKind } from './main-8020';
 
 const DHCP_TIMEOUT_MS = 15000;
 const POLL_INTERVAL_MS = 1000;
@@ -29,6 +32,17 @@ const sessionListEl = el<HTMLDivElement>('session-list');
 const connPill = el<HTMLElement>('connection-pill');
 const connSummary = el<HTMLElement>('conn-summary');
 const connDetails = el<HTMLDetailsElement>('conn-details');
+
+// Collapse the debug gutter by default on narrow screens. Use
+// matchMedia rather than a media query in CSS so the user's manual
+// expand/collapse choice persists across viewport changes (we only
+// flip the initial state).
+{
+  const gutter = document.getElementById('debug-gutter-details') as HTMLDetailsElement | null;
+  if (gutter && window.matchMedia('(max-width: 900px)').matches) {
+    gutter.open = false;
+  }
+}
 
 // Tab switching — two tabs share the right column; flipping is just a
 // CSS class + `hidden` attribute swap.
@@ -97,58 +111,64 @@ void (async () => {
 // ----- Device picker (top connection pill) -----
 //
 // Single Connect button drives the right transport based on which
-// device segment is selected. The 8020 panel exposes a controller;
-// the 8030 path uses the existing connect()/disconnect() below.
+// device segment is selected. The Test Runs / Sampling tabs are
+// device-agnostic (FitTestUi dispatches based on its deviceMode).
 
 type DeviceMode = '8030-usb' | '8020-serial' | '8020-sim';
 let deviceMode: DeviceMode = '8030-usb';
-let pc8020: Pc8020Controller | null = null;
+/** Live 8020 client/stream, populated while in 8020 (serial or sim) mode. */
+let session8020: { client: Portacount8020; stream: ByteStream } | null = null;
+/** Active 8020 sampling session — null when not sampling. */
+let active8020Sampling: {
+  sessionId: number;
+  startedAt: number;
+  card: ActiveCardHandle;
+  unsubscribe: () => void;
+} | null = null;
 
-{
-  const host = document.getElementById('pc8020-host');
-  if (host) pc8020 = mount8020Panel(host as HTMLElement);
-}
+// Common USB-serial adapter vendor IDs for the Web Serial port chooser.
+// Used in 8020-serial mode so the dialog only shows plausible cables.
+const USB_SERIAL_FILTERS = [
+  { usbVendorId: 0x0403 }, // FTDI
+  { usbVendorId: 0x067b }, // Prolific PL2303
+  { usbVendorId: 0x10c4 }, // Silicon Labs CP210x
+  { usbVendorId: 0x1a86 }, // WCH CH340 / CH341
+];
 
-// Pipe the 8020 panel's log into the main Event Log.
-pc8020?.onLog((msg) => log(`[8020] ${msg}`));
-
-// Segmented picker buttons.
 const devicePickerEls = Array.from(
   document.querySelectorAll<HTMLButtonElement>('.device-opt'),
 );
 function setDeviceMode(next: DeviceMode): void {
-  if (next === deviceMode && devicePickerEls.some((b) => b.classList.contains('active'))) {
-    return;
-  }
   deviceMode = next;
   for (const btn of devicePickerEls) {
     const on = (btn.dataset.device as DeviceMode) === next;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-checked', String(on));
   }
-  // Hide/show device-specific panels.
-  for (const el of document.querySelectorAll<HTMLElement>('[data-device-panel]')) {
-    const showFor = el.dataset.devicePanel;
-    el.hidden = !(
-      (next === '8030-usb' && showFor === '8030') ||
-      ((next === '8020-serial' || next === '8020-sim') && showFor === '8020')
-    );
-  }
-  // Hide/show the tab bar — only the 8030 has multiple tabs.
-  for (const el of document.querySelectorAll<HTMLElement>('[data-device-tabs]')) {
-    el.hidden = el.dataset.deviceTabs !== '8030' || next !== '8030-usb';
+  fittestUi?.setDeviceMode(next === '8030-usb' ? '8030' : '8020');
+  // Sampling Start button: enabled whenever the appropriate
+  // device is connected and not currently sampling.
+  refreshSamplingButtons();
+}
+
+function refreshSamplingButtons(): void {
+  if (deviceMode === '8030-usb') {
+    startBtn.disabled = !(session !== null && !session.active);
+    stopBtn.disabled = !(session?.active);
+  } else {
+    startBtn.disabled = !(session8020 !== null && !active8020Sampling);
+    stopBtn.disabled = !active8020Sampling;
   }
 }
 for (const btn of devicePickerEls) {
   btn.addEventListener('click', () => {
-    if (session || pc8020?.connection === 'ready' || pc8020?.connection === 'connecting') {
+    if (session || session8020) {
       log('cannot switch device while connected — disconnect first.');
       return;
     }
     setDeviceMode(btn.dataset.device as DeviceMode);
   });
 }
-// Initialize visibility on load (defaults to 8030).
 setDeviceMode(deviceMode);
 
 // Initialize the fit-test UI. Construct it eagerly so DOM bindings settle
@@ -166,9 +186,15 @@ void (async () => {
       stopBtn.disabled = true;
     },
     onTestEnded: () => {
-      if (session && !session.active) startBtn.disabled = false;
+      if (session && !session.active && deviceMode === '8030-usb') {
+        startBtn.disabled = false;
+      }
     },
   });
+  // Sync the deviceMode the UI was initialized with (in case the
+  // user already clicked a non-default picker option before the UI
+  // finished loading).
+  fittestUi.setDeviceMode(deviceMode === '8030-usb' ? '8030' : '8020');
   try {
     fittestStore = await openFitTestStore();
     fittestUi.setStore(fittestStore);
@@ -303,38 +329,197 @@ disconnectBtn.addEventListener('click', () => {
   }
 });
 
-async function connect8020(transport: TransportKind): Promise<void> {
-  if (!pc8020) throw new Error('8020 panel not mounted');
+async function connect8020(transport: 'serial' | 'simulator'): Promise<void> {
+  if (session8020) throw new Error('8020 already connected');
   setConnState('connecting', `Connecting to 8020 (${transport})…`);
-  await pc8020.connect({ transport });
-  setConnState('connected', `PortaCount 8020 (${transport})`);
+
+  let stream: ByteStream;
+  if (transport === 'simulator') {
+    const ws = new WebSocketByteStream({ url: 'ws://localhost:18020', log });
+    await ws.ready();
+    stream = ws;
+  } else {
+    const nav = navigator as unknown as {
+      serial?: { requestPort: (opts?: { filters?: unknown[] }) => Promise<unknown> };
+    };
+    if (!nav.serial) {
+      throw new Error('Web Serial not available — use Chromium 89+ or Firefox 132+.');
+    }
+    const port = (await nav.serial.requestPort({
+      filters: USB_SERIAL_FILTERS,
+    })) as unknown as ConstructorParameters<typeof WebSerialByteStream>[0];
+    const wss = new WebSerialByteStream(port, {
+      openParams: { baudRate: 1200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' },
+      log,
+    });
+    await wss.ready();
+    stream = wss;
+  }
+
+  const client = new Portacount8020({ log: (m) => log(`[8020] ${m}`) });
+  client.onLine((line) => log(`[8020] < ${line}`));
+  log(`connecting via ${stream.info?.label ?? '(unknown)'}…`);
+  await client.connect(stream, {
+    enableExternalControl: true,
+    enableDataTransmission: true,
+    requestRuntimeStatus: true,
+    requestSettings: true,
+  });
+  log('8020 connected.');
+
+  session8020 = { client, stream };
+  fittestUi?.setPortacount8020(client);
+  refreshSamplingButtons();
+
+  setText('sn-val', client.snapshot.settings.serialNumber ?? '—');
+  setText('model-val', `PortaCount 8020${client.identity.firmwareVersion ? ` (${client.identity.firmwareVersion})` : ''}`);
+  setText('build-val', client.identity.firmwareVersion ?? '—');
+  setStatus('usb-status', 'ok', `serial @ ${stream.info?.label ?? '?'}`);
+  setStatus('dhcp-status', 'pending', '(n/a for 8020)');
+  setStatus('runtime-status', 'ok', client.snapshot.runtime
+    ? `battery=${client.snapshot.runtime.battery} pulse=${client.snapshot.runtime.pulse}`
+    : 'unknown');
+  setStatus('handshake-status', 'ok', 'external control');
   disconnectBtn.disabled = false;
-  // 8020 has no concept of the 8030's USB/RNDIS/DHCP/handshake
-  // status grid; collapse the details and clear stale 8030 fields.
+  setConnState('connected', `PortaCount 8020 · SN ${client.snapshot.settings.serialNumber ?? '?'}`);
   connDetails.open = false;
 }
 
 async function disconnect8020(): Promise<void> {
-  if (!pc8020) return;
-  await pc8020.disconnect();
+  // Tear down sampling first.
+  if (active8020Sampling) {
+    await stopSampling8020().catch(() => undefined);
+  }
+  const s = session8020;
+  session8020 = null;
+  fittestUi?.setPortacount8020(null);
+  refreshSamplingButtons();
+  if (s) {
+    try { await s.client.disconnect(); } catch (err) { log(`[8020] disconnect: ${(err as Error).message}`); }
+  }
+  for (const id of ['usb-status', 'dhcp-status', 'runtime-status', 'handshake-status']) {
+    setStatus(id, 'pending', 'Idle');
+  }
+  setText('sn-val', '—');
+  setText('model-val', '—');
+  setText('build-val', '—');
   connectBtn.disabled = false;
   setConnState('disconnected', 'Not connected');
 }
 
 startBtn.addEventListener('click', () => {
-  if (!session) return;
-  startBtn.disabled = true;
-  startSampling(session).catch((err) => {
-    log(`start: ${(err as Error).message}`);
-    startBtn.disabled = false;
-  });
+  if (deviceMode === '8030-usb') {
+    if (!session) return;
+    startBtn.disabled = true;
+    startSampling(session).catch((err) => {
+      log(`start: ${(err as Error).message}`);
+      startBtn.disabled = false;
+    });
+  } else {
+    if (!session8020) return;
+    startBtn.disabled = true;
+    startSampling8020(session8020.client).catch((err) => {
+      log(`start (8020): ${(err as Error).message}`);
+      refreshSamplingButtons();
+    });
+  }
 });
 
 stopBtn.addEventListener('click', () => {
-  if (!session) return;
-  stopBtn.disabled = true;
-  stopSampling(session).catch((err) => log(`stop: ${(err as Error).message}`));
+  if (deviceMode === '8030-usb') {
+    if (!session) return;
+    stopBtn.disabled = true;
+    stopSampling(session).catch((err) => log(`stop: ${(err as Error).message}`));
+  } else {
+    stopBtn.disabled = true;
+    stopSampling8020().catch((err) => log(`stop (8020): ${(err as Error).message}`));
+  }
 });
+
+async function startSampling8020(client: Portacount8020): Promise<void> {
+  if (active8020Sampling) return;
+  if (!sessionStore || !sessionPanel) {
+    log('session store not ready');
+    refreshSamplingButtons();
+    return;
+  }
+  const deviceSn = client.snapshot.settings.serialNumber ?? 'unknown';
+  const startedAt = await sessionStore.startSession({
+    deviceSn,
+    deviceModel: '8020',
+    deviceBuild: client.identity.firmwareVersion ?? '',
+  });
+  const card = sessionPanel.beginActive({
+    startedAt,
+    deviceSn,
+    deviceModel: '8020',
+    deviceBuild: client.identity.firmwareVersion ?? '',
+  });
+  // Subscribe to the device's state stream; every state change is
+  // potentially a new concentration reading. To rate-limit recording
+  // to ~1 Hz (the device's own emission rate), we just key off
+  // lastConcentration changing.
+  let lastRecorded = -Infinity;
+  let lastValueSeen: number | null = null;
+  const unsubscribe = client.onState((st) => {
+    if (st.lastConcentration === null) return;
+    if (st.lastConcentration === lastValueSeen) return;
+    lastValueSeen = st.lastConcentration;
+    const t = Date.now() - startedAt;
+    if (t - lastRecorded < 500) return; // soft 2 Hz cap
+    lastRecorded = t;
+    const onMask = st.sampleSource === 'mask';
+    const sample: SampleRecord = {
+      sessionId: startedAt,
+      t,
+      // 8020 doesn't sample ambient and mask simultaneously. Park
+      // the current reading on whichever side the valve points at;
+      // the other side is left at 0. The history chart will show
+      // staircase-ish data.
+      amb: onMask ? 0 : st.lastConcentration,
+      mask: onMask ? st.lastConcentration : 0,
+      ff: 0, // computed FF only meaningful in a fit test, not raw sampling
+      status: `valve=${st.sampleSource}`,
+      msg: '',
+      lowAlcohol: false,
+    };
+    // Update sampling-tab readings.
+    setText('rt-status', `valve=${st.sampleSource}`);
+    if (onMask) setText('rt-mask', st.lastConcentration.toFixed(2));
+    else setText('rt-amb', st.lastConcentration.toFixed(2));
+    setText('rt-ff', '—');
+    setText('rt-msg', '(8020: host-driven; no live FF during sampling)');
+    setText('rt-low', '—');
+    card.append(sample);
+    sessionStore?.recordSample(sample).catch((err) =>
+      log(`recordSample: ${(err as Error).message}`),
+    );
+  });
+  active8020Sampling = { sessionId: startedAt, startedAt, card, unsubscribe };
+  setSamplingDirty(true);
+  log(`[8020] sampling started → session ${startedAt}`);
+  refreshSamplingButtons();
+}
+
+async function stopSampling8020(): Promise<void> {
+  const s = active8020Sampling;
+  active8020Sampling = null;
+  if (!s) {
+    refreshSamplingButtons();
+    return;
+  }
+  s.unsubscribe();
+  setSamplingDirty(false);
+  const endedAt = Date.now();
+  s.card.end(endedAt);
+  try {
+    await sessionStore?.endSession(s.sessionId, endedAt);
+  } catch (err) {
+    log(`session end (8020): ${(err as Error).message}`);
+  }
+  log(`[8020] sampling stopped (session ${s.sessionId})`);
+  refreshSamplingButtons();
+}
 
 // Best-effort cleanup on page teardown (full reload from Vite HMR, tab
 // close, navigation). disconnect() is async — pagehide can't await — but
@@ -346,8 +531,8 @@ window.addEventListener('pagehide', () => {
   if (session) {
     void disconnect();
   }
-  if (pc8020 && pc8020.connection !== 'idle' && pc8020.connection !== 'closed') {
-    void pc8020.disconnect();
+  if (session8020) {
+    void disconnect8020();
   }
 });
 

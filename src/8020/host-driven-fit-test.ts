@@ -23,25 +23,39 @@ import type {
   FitTestResult8020,
 } from './fit-test-runner';
 
-/** Default cycle timings (seconds). Matches the canonical OSHA
- * exercise: 4 s ambient purge, 5 s ambient sample, 11 s mask purge,
- * 40 s mask sample. These also match the configured timings on a
- * factory-default 8020 (verified from the `S` burst on S/N 44960). */
+/** Default cycle timings (seconds), shared across all exercises in
+ * a host-driven test. Matches the configured timings on a
+ * factory-default 8020 (verified from the `S` burst on S/N 44960):
+ * 4 s ambient purge, 5 s ambient sample, 11 s mask purge. Mask-sample
+ * duration is per-exercise and lives on the {@link HostDrivenExercise}
+ * record, not here. */
 export const DEFAULT_CYCLE = Object.freeze({
   ambientPurgeSec: 4,
   ambientSampleSec: 5,
   maskPurgeSec: 11,
-  maskSampleSec: 40,
 });
 
+/** Default mask-sample duration when callers want a uniform exercise. */
+export const DEFAULT_MASK_SAMPLE_SEC = 40;
+
+/** One exercise's spec — name + mask-sample duration. Mirrors the
+ * `ProtocolExercise` shape from `fit-test-types` but kept local so
+ * this module doesn't depend on the broader fit-test type tree. */
+export interface HostDrivenExercise {
+  name: string;
+  maskSampleSec: number;
+  /** When true, the exercise still runs but its FF is excluded from
+   * the overall harmonic mean. Defaults to false. */
+  excluded?: boolean;
+}
+
 export interface HostDrivenFitTestOptions {
-  /** Number of exercises to run. Each takes ambient_purge +
-   * ambient_sample + mask_purge + mask_sample seconds. */
-  exercises: number;
+  /** Per-exercise sequence. Each exercise reuses the shared ambient
+   * purge/sample and mask purge timings, but its own maskSampleSec. */
+  exercises: HostDrivenExercise[];
   ambientPurgeSec: number;
   ambientSampleSec: number;
   maskPurgeSec: number;
-  maskSampleSec: number;
   /** OSHA pass threshold for PASS/FAIL labeling. Defaults to 100. */
   passLevel: number;
   /** Per-valve-switch command timeout. Defaults to 4 s. */
@@ -185,7 +199,9 @@ export async function runHostDrivenFitTest(
     await client.command('VN', { timeoutMs: commandTimeoutMs });
 
     const exercises: ExerciseResult8020[] = [];
-    for (let i = 1; i <= opts.exercises; i++) {
+    for (let idx = 0; idx < opts.exercises.length; idx++) {
+      const ex = opts.exercises[idx]!;
+      const i = idx + 1;
       if (signal?.aborted) throw new FitTestAbortedError8020(signal.reason);
 
       // Ambient phase.
@@ -200,7 +216,7 @@ export async function runHostDrivenFitTest(
       await phase(i, 'mask-purge', opts.maskPurgeSec * 1000, null);
 
       const maskSamples: number[] = [];
-      await phase(i, 'mask-sample', opts.maskSampleSec * 1000, maskSamples);
+      await phase(i, 'mask-sample', ex.maskSampleSec * 1000, maskSamples);
 
       const meanAmb = mean(ambSamples);
       const meanMask = mean(maskSamples);
@@ -220,8 +236,12 @@ export async function runHostDrivenFitTest(
       /* non-fatal: closing-time courtesy */
     });
 
-    const finiteFFs = exercises.map((e) => e.fitFactor).filter((x) => Number.isFinite(x));
-    const overall = finiteFFs.length > 0 ? harmonicMean(finiteFFs) : null;
+    // Overall FF uses only non-excluded, finite per-exercise FFs.
+    const includedFFs = exercises
+      .filter((_, idx) => !opts.exercises[idx]!.excluded)
+      .map((e) => e.fitFactor)
+      .filter((x) => Number.isFinite(x));
+    const overall = includedFFs.length > 0 ? harmonicMean(includedFFs) : null;
     const overallResult =
       overall === null ? null : overall >= opts.passLevel ? 'PASS' : 'FAIL';
 

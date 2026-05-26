@@ -30,16 +30,97 @@ main {
 
 .cols {
   display: grid;
-  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  /* Main content on the left, event-log gutter on the right. The
+   * right column shrinks to a slim strip when the gutter's <details>
+   * is closed; see the :has() rule below. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
   gap: 2rem;
   align-items: start;
 }
 
-@media (max-width: 900px) {
-  .cols {
-    grid-template-columns: minmax(0, 1fr);
-  }
+/* When the gutter is collapsed, shrink the column to its content
+ * (just the slim summary strip), giving all remaining width to the
+ * main content area. */
+.cols:has(.debug-gutter > details:not([open])) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
 }
+
+/* ----- Debug gutter (right side, collapsible) ----- */
+
+.debug-gutter {
+  /* Sticky so the log stays visible as the main column scrolls. */
+  position: sticky;
+  top: 1rem;
+  min-width: 0;
+}
+
+.debug-gutter > details {
+  background: #12121e;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+}
+
+.debug-gutter > details > summary {
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  font-weight: 500;
+  user-select: none;
+  border-bottom: 1px solid #2a2a3e;
+  list-style: none;
+}
+
+.debug-gutter > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.debug-gutter > details > summary::before {
+  content: '▾';
+  display: inline-block;
+  width: 1em;
+  color: #888;
+  transition: transform 150ms ease;
+}
+
+.debug-gutter > details:not([open]) > summary::before {
+  transform: rotate(-90deg);
+}
+
+/* Collapsed state: trim the summary into a slim vertical strip so
+ * the column only takes a thumb's-width of horizontal space. The
+ * summary text stays horizontal but no border-bottom (we hid the
+ * body). */
+.debug-gutter > details:not([open]) > summary {
+  border-bottom: 0;
+  padding: 0.5rem 0.5rem;
+  white-space: nowrap;
+}
+
+.debug-gutter .debug-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #2a2a3e;
+  font-size: 0.8rem;
+}
+
+.debug-gutter .debug-tools .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.debug-gutter #event-log {
+  max-height: 60vh;
+}
+
+/* On narrow screens the gutter starts collapsed (the JS in main.ts
+ * sets details.open = false at <900px on load), and the :has() rule
+ * above shrinks the column to a thin strip. No further CSS needed —
+ * the column never wraps to a new row, regardless of viewport. */
 
 /* ----- Connection pill ----- */
 
@@ -117,7 +198,9 @@ main {
   align-items: center;
 }
 
-/* Segmented device picker. */
+/* Segmented device picker. One rounded pill with internal dividers;
+ * inner buttons must not have their own rounded corners or focus
+ * outlines, otherwise the segments look like three separate pills. */
 .device-picker {
   display: inline-flex;
   border: 1px solid #2a2a3e;
@@ -130,11 +213,21 @@ main {
   background: #12121e;
   color: #aaa;
   border: 0;
+  border-radius: 0;
   padding: 0.4rem 0.75rem;
+  margin: 0;
   font: inherit;
   cursor: pointer;
   border-right: 1px solid #2a2a3e;
   min-width: 5em;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.device-picker .device-opt:focus-visible {
+  outline: 2px solid #4ade80;
+  outline-offset: -2px;
 }
 
 .device-picker .device-opt:last-child {
@@ -254,104 +347,6 @@ main {
   .sampling-readings { grid-template-columns: 1fr; }
 }
 
-/* ----- 8020 tab (provisional — frontend will be rebased) ----- */
-
-.pc8020-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.pc8020-controls {
-  background: #12121e;
-  border: 1px solid #2a2a3e;
-  border-radius: 6px;
-  padding: 0.75rem;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem 1rem;
-  align-items: center;
-}
-
-.pc8020-controls label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  white-space: nowrap;
-}
-
-.pc8020-controls .pc8020-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 0.5rem;
-}
-
-.pc8020-readings {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.25rem 0.75rem;
-  background: #12121e;
-  border: 1px solid #2a2a3e;
-  border-radius: 6px;
-  padding: 0.75rem;
-}
-
-.pc8020-readings > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  border-bottom: 1px dashed #1f1f2e;
-}
-
-.pc8020-readings .label {
-  color: #888;
-  font-size: 0.85rem;
-}
-
-.pc8020-runner {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.pc8020-runner ul {
-  list-style: none;
-  padding: 0;
-  margin: 0.25rem 0;
-  max-height: 14rem;
-  overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-}
-
-.pc8020-runner ul li {
-  padding: 0.15rem 0.4rem;
-  border-bottom: 1px solid #1a1a2a;
-}
-
-.pc8020-log {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.pc8020-log .event-log {
-  max-height: 16rem;
-  overflow-y: auto;
-  background: #0a0a14;
-  border: 1px solid #2a2a3e;
-  border-radius: 4px;
-  padding: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-}
-
-@media (max-width: 700px) {
-  .pc8020-controls { grid-template-columns: 1fr; }
-  .pc8020-readings { grid-template-columns: 1fr; }
-}
-
 /* ----- Test Runs tab ----- */
 
 /* Primary fit-test fields — Name + Mask above the fold. */
@@ -372,6 +367,38 @@ main {
 .fittest-form .row.primary input {
   font-size: 1rem;
   padding: 0.5rem 0.75rem;
+}
+
+/* Protocol picker + N95 toggle on one line — Protocol left, N95 right. */
+.fittest-form .row.primary.protocol-row {
+  grid-template-columns: 5rem 1fr auto;
+}
+
+.fittest-form .row.primary.protocol-row select {
+  font-size: 1rem;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+
+.fittest-form .row.primary .n95-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #aaa;
+  font-size: 0.85rem;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .fittest-form .row.primary.protocol-row {
+    grid-template-columns: 5rem 1fr;
+  }
+  .fittest-form .row.primary .n95-inline {
+    grid-column: 2;
+  }
 }
 
 /* Disclosure for secondary settings. Custom right-side chevron, larger

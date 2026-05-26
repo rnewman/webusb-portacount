@@ -5,15 +5,23 @@
 
 import {
   FitTestRunner,
+  runHostDrivenFitTest,
+  FitTestAbortedError8020,
   type DeviceInfo,
+  type ExerciseSnapshot,
+  type ExerciseStatus,
   type FitTestMask,
   type FitTestPerson,
   type FitTestProtocolDef,
+  type FitTestResult,
+  type FitTestRunnerCallbacks,
   type FitTestStartOptions,
+  type FitTestStatus,
   type Portacount,
+  type Portacount8020,
 } from 'webusb-portacount';
 
-import { DEFAULT_PROTOCOLS, type NamedProtocol } from './fittest-defaults';
+import { protocolsForDevice, type NamedProtocol } from './fittest-defaults';
 import { FitTestPanel } from './fittest-panel';
 import type { FitTestStore } from './fittest-store';
 import {
@@ -33,9 +41,14 @@ export interface FitTestUiCallbacks {
 
 interface ActiveRun {
   testId: number;
-  runner: FitTestRunner;
   historyHandle: ActiveFitTestHandle | null;
+  /** Set when an 8030 FitTestRunner is in flight. */
+  runner: FitTestRunner | null;
+  /** Set when a host-driven 8020 test is in flight. */
+  abort8020: AbortController | null;
 }
+
+export type DeviceMode = '8030' | '8020';
 
 interface DebugCapture {
   record: (kind: string, payload: Record<string, unknown>) => void;
@@ -48,6 +61,8 @@ export class FitTestUi {
   private history: FitTestHistoryPanel | null = null;
   private pc: Portacount | null = null;
   private deviceInfo: DeviceInfo | null = null;
+  private pc8020: Portacount8020 | null = null;
+  private deviceMode: DeviceMode = '8030';
   private active: ActiveRun | null = null;
   private cb: FitTestUiCallbacks;
   private tabRoot: HTMLElement;
@@ -73,12 +88,7 @@ export class FitTestUi {
     this.panel = new FitTestPanel(panelRoot);
     this.panel.hide();
     this.protocolSelect = tabRoot.querySelector<HTMLSelectElement>('#ft-protocol')!;
-    for (const p of DEFAULT_PROTOCOLS) {
-      const opt = document.createElement('option');
-      opt.value = p.displayName;
-      opt.textContent = p.displayName;
-      this.protocolSelect.appendChild(opt);
-    }
+    this.populateProtocols();
     this.protocolSummary = tabRoot.querySelector<HTMLElement>('[data-current-protocol]');
     this.refreshProtocolSummary();
     this.protocolSelect.addEventListener('change', () => this.refreshProtocolSummary());
@@ -126,6 +136,37 @@ export class FitTestUi {
     }
   }
 
+  private populateProtocols(): void {
+    const prev = this.protocolSelect.value;
+    const protocols = protocolsForDevice(this.deviceMode);
+    this.protocolSelect.replaceChildren();
+    for (const p of protocols) {
+      const opt = document.createElement('option');
+      opt.value = p.displayName;
+      opt.textContent = p.displayName;
+      this.protocolSelect.appendChild(opt);
+    }
+    // Restore prior selection if still valid; otherwise default to the
+    // first entry.
+    if (prev && protocols.some((p) => p.displayName === prev)) {
+      this.protocolSelect.value = prev;
+    }
+  }
+
+  /** Switch between 8030 and 8020 modes. Repopulates the protocol
+   * dropdown and updates which client/info the Start button targets. */
+  setDeviceMode(mode: DeviceMode): void {
+    if (this.deviceMode === mode) return;
+    this.deviceMode = mode;
+    this.populateProtocols();
+    this.refreshProtocolSummary();
+    this.refreshStartButton();
+  }
+
+  get currentDeviceMode(): DeviceMode {
+    return this.deviceMode;
+  }
+
   setStore(store: FitTestStore): void {
     this.store = store;
   }
@@ -134,22 +175,32 @@ export class FitTestUi {
     this.history = panel;
   }
 
-  /** Called from main when the Portacount becomes available / unavailable. */
+  /** Called from main when the 8030 Portacount becomes available /
+   * unavailable. */
   setPortacount(pc: Portacount | null, info: DeviceInfo | null): void {
     this.pc = pc;
     this.deviceInfo = info;
-    // If the Portacount we were polling has gone away (Disconnect button,
-    // USB unplug, HMR teardown) and a run is in flight, kick the runner
-    // so its promise rejects promptly instead of waiting for the next
-    // tick's pc.command to time out (or hang, if the USB transport
-    // dropped without a clean TCP close).
-    if (!pc && this.active) {
+    if (!pc && this.active?.runner) {
       this.active.runner.abort().catch(() => undefined);
     }
-    // Connection state only gates the Start button — the form stays
-    // editable so the user can pre-fill name/mask before plugging in.
     this.setFormEnabled(this.active === null);
-    if (!pc) this.panel.hide();
+    if (!pc && this.deviceMode === '8030') this.panel.hide();
+  }
+
+  /** Called from main when the 8020 client becomes available /
+   * unavailable. */
+  setPortacount8020(client: Portacount8020 | null): void {
+    this.pc8020 = client;
+    if (!client && this.active?.abort8020) {
+      this.active.abort8020.abort(new Error('client disconnected'));
+    }
+    this.setFormEnabled(this.active === null);
+    if (!client && this.deviceMode === '8020') this.panel.hide();
+  }
+
+  private refreshStartButton(): void {
+    const haveClient = this.deviceMode === '8030' ? this.pc !== null : this.pc8020 !== null;
+    this.startBtn.disabled = this.active !== null || !haveClient;
   }
 
   /** Returns true while a fit test is running. */
@@ -168,7 +219,8 @@ export class FitTestUi {
     ]) {
       el.disabled = !enabled;
     }
-    this.startBtn.disabled = !enabled || this.pc === null;
+    const haveClient = this.deviceMode === '8030' ? this.pc !== null : this.pc8020 !== null;
+    this.startBtn.disabled = !enabled || !haveClient;
     this.abortBtn.disabled = enabled || this.active === null;
   }
 
@@ -179,7 +231,9 @@ export class FitTestUi {
     start: FitTestStartOptions;
     chosen: NamedProtocol;
   } | null {
-    const chosen = DEFAULT_PROTOCOLS.find((p) => p.displayName === this.protocolSelect.value);
+    const chosen = protocolsForDevice(this.deviceMode).find(
+      (p) => p.displayName === this.protocolSelect.value,
+    );
     if (!chosen) {
       this.cb.log('fit test: no protocol selected');
       return null;
@@ -224,13 +278,21 @@ export class FitTestUi {
   }
 
   private async startTest(): Promise<void> {
-    if (!this.pc || !this.deviceInfo) {
-      this.cb.log('fit test: not connected');
-      return;
-    }
     if (this.active) return;
     const collected = this.collectForm();
     if (!collected) return;
+    if (this.deviceMode === '8020') {
+      await this.startTest8020(collected);
+    } else {
+      await this.startTest8030(collected);
+    }
+  }
+
+  private async startTest8030(collected: NonNullable<ReturnType<typeof this.collectForm>>): Promise<void> {
+    if (!this.pc || !this.deviceInfo) {
+      this.cb.log('fit test: not connected (8030)');
+      return;
+    }
     const { person, mask, protocol, start, chosen } = collected;
     this.panel.reset();
     this.panel.show();
@@ -301,7 +363,7 @@ export class FitTestUi {
       },
     }, (msg) => this.cb.log(msg));
 
-    this.active = { testId, runner, historyHandle };
+    this.active = { testId, runner, historyHandle, abort8020: null };
 
     try {
       const result = await runner.run({
@@ -332,8 +394,250 @@ export class FitTestUi {
       debug?.finalize();
       this.active = null;
       this.cb.onTestEnded();
-      this.setFormEnabled(this.pc !== null);
+      this.setFormEnabled(true);
     }
+  }
+
+  private async startTest8020(
+    collected: NonNullable<ReturnType<typeof this.collectForm>>,
+  ): Promise<void> {
+    if (!this.pc8020) {
+      this.cb.log('fit test: not connected (8020)');
+      return;
+    }
+    const client = this.pc8020;
+    const { person, mask, protocol, start, chosen } = collected;
+    this.panel.reset();
+    this.panel.show();
+    this.cb.onTestStarted();
+    this.setFormEnabled(false);
+    this.abortBtn.disabled = false;
+
+    // Storage write — schema is identical to 8030 because the user
+    // wanted "exact same storage". The deviceModel marker is the only
+    // discriminator.
+    const deviceSn = client.snapshot.settings.serialNumber ?? 'unknown';
+    let testId = 0;
+    let historyHandle: ActiveFitTestHandle | null = null;
+    if (this.store) {
+      try {
+        testId = await this.store.startTest({
+          deviceSn,
+          deviceModel: '8020',
+          deviceBuild: client.identity.firmwareVersion ?? '',
+          person, mask, protocol, start,
+        });
+        if (this.history) {
+          historyHandle = this.history.beginActive({
+            startedAt: testId,
+            deviceSn,
+            deviceModel: '8020',
+            deviceBuild: client.identity.firmwareVersion ?? '',
+            person, mask, protocol, start,
+          });
+        }
+      } catch (err) {
+        this.cb.log(`fit test (8020): store.startTest: ${(err as Error).message}`);
+      }
+    }
+
+    // Per-exercise expected duration in seconds (used to compute
+    // progressPercent in synthesized status snapshots).
+    const perExerciseSec = (ex: { maskSampleSec: number }) =>
+      protocol.ambientPurgeSec + protocol.ambientSampleSec +
+      protocol.maskPurgeSec + ex.maskSampleSec;
+    const totalSec = protocol.exercises.reduce((acc, e) => acc + perExerciseSec(e), 0);
+    const runStartedAt = Date.now();
+
+    // FitTestStatus synth state. We build a fresh snapshot on each
+    // phase transition / sample / exercise completion and call
+    // onStatusUpdate so the FitTestPanel + history card keep
+    // rendering exactly as they do for 8030.
+    const completedExercises = new Map<number, { ff: number; status: 'PASS' | 'FAIL' }>();
+    let currentPhase: string = 'IDLE';
+    let currentExerciseIdx = 0; // 0-based
+    let lastAmb = 0;
+    let lastMask = 0;
+    let ambStatus: 'PASS' | 'FAIL' | 'TESTING' | undefined;
+    let maskStatus: 'PASS' | 'FAIL' | 'TESTING' | undefined;
+
+    const buildStatus = (): FitTestStatus => {
+      const elapsedSec = (Date.now() - runStartedAt) / 1000;
+      const exercises: ExerciseSnapshot[] = [];
+      for (let i = 0; i < 12; i++) {
+        const proto = protocol.exercises[i];
+        if (!proto) {
+          exercises.push({ index: i, name: '', fitFactor: null, status: 'NOT_STARTED', excluded: false });
+          continue;
+        }
+        const done = completedExercises.get(i);
+        let status: ExerciseStatus = 'NOT_STARTED';
+        if (done) status = done.status;
+        else if (i === currentExerciseIdx && currentPhase !== 'IDLE') status = 'TESTING';
+        if (proto.excluded) status = 'EXCLUDED';
+        exercises.push({
+          index: i,
+          name: proto.name,
+          fitFactor: done?.ff ?? null,
+          status,
+          excluded: proto.excluded,
+        });
+      }
+      return {
+        newData: new Date().toISOString(),
+        ffOverall: null,
+        status: currentPhase,
+        done: false,
+        progressPercent: Math.min(100, Math.round((elapsedSec / totalSec) * 100)),
+        exerciseNumber: currentExerciseIdx,
+        ffPassLevel: mask.passLevel,
+        ambConc: lastAmb,
+        ambConcStatus: ambStatus,
+        maskConc: lastMask,
+        maskConcStatus: maskStatus,
+        seconds: 0,
+        totalSeconds: Math.round(elapsedSec),
+        lowAlcoholWarning: false,
+        lowParticleWarning: false,
+        exercises,
+        raw: {},
+      };
+    };
+
+    const emitStatus = () => {
+      const s = buildStatus();
+      this.panel.update(s, { protocolName: chosen.displayName });
+      historyHandle?.updateStatus(s);
+    };
+
+    const ac = new AbortController();
+    this.active = { testId, runner: null, historyHandle, abort8020: ac };
+
+    let result8020: Awaited<ReturnType<typeof runHostDrivenFitTest>> | null = null;
+    let runError: Error | null = null;
+    try {
+      result8020 = await runHostDrivenFitTest(
+        client,
+        {
+          exercises: protocol.exercises.map((e) => ({
+            name: e.name,
+            maskSampleSec: e.maskSampleSec,
+            excluded: e.excluded,
+          })),
+          ambientPurgeSec: protocol.ambientPurgeSec,
+          ambientSampleSec: protocol.ambientSampleSec,
+          maskPurgeSec: protocol.maskPurgeSec,
+          passLevel: mask.passLevel,
+          signal: ac.signal,
+        },
+        {
+          onPhaseStart: (info) => {
+            currentExerciseIdx = info.exerciseNumber - 1;
+            currentPhase =
+              info.phase === 'ambient-purge' ? 'AMBIENT_PURGE'
+              : info.phase === 'ambient-sample' ? 'AMBIENT_SAMPLE'
+              : info.phase === 'mask-purge' ? 'MASK_PURGE'
+              : 'MASK_SAMPLE';
+            ambStatus = info.phase.startsWith('ambient') ? 'TESTING' : undefined;
+            maskStatus = info.phase.startsWith('mask') ? 'TESTING' : undefined;
+            emitStatus();
+          },
+          onSample: (s) => {
+            if (s.phase.startsWith('ambient')) lastAmb = s.concentration;
+            else lastMask = s.concentration;
+            emitStatus();
+            // Store per-sample so the chart renders. testId>0 if the
+            // store accepted startTest().
+            const sample = {
+              testId,
+              t: Date.now() - runStartedAt,
+              amb: lastAmb,
+              mask: lastMask,
+              ambStatus,
+              maskStatus,
+              exerciseNumber: currentExerciseIdx,
+              phase: currentPhase,
+            };
+            historyHandle?.appendSample(sample);
+            if (this.store && testId > 0) {
+              this.store.recordSample(sample).catch((err) =>
+                this.cb.log(`fit test (8020): recordSample: ${(err as Error).message}`),
+              );
+            }
+          },
+          onExerciseCompleted: (r) => {
+            const idx = r.exerciseNumber - 1;
+            completedExercises.set(idx, {
+              ff: r.fitFactor,
+              status: r.result === 'PASS' ? 'PASS' : 'FAIL',
+            });
+            this.cb.log(`[ex ${r.exerciseNumber}] ${protocol.exercises[idx]?.name ?? ''} FF=${r.fitFactor.toFixed(1)} ${r.result}`);
+            emitStatus();
+          },
+        },
+      );
+    } catch (err) {
+      runError = err as Error;
+    }
+
+    // Final result write to the store, mirroring the 8030 path.
+    const ffOverall = result8020?.overallFitFactor ?? null;
+    const ffOverallStatus = result8020?.overallResult === 'PASS' ? 'PASS'
+      : result8020?.overallResult === 'FAIL' ? 'FAIL'
+      : undefined;
+    const exerciseResults: FitTestResult['exercises'] = (result8020?.exercises ?? []).map((e) => {
+      const idx = e.exerciseNumber - 1;
+      return {
+        index: idx,
+        name: protocol.exercises[idx]?.name ?? '',
+        fitFactor: Number.isFinite(e.fitFactor) ? e.fitFactor : null,
+        status: e.result === 'PASS' ? 'PASS' : e.result === 'FAIL' ? 'FAIL' : 'PASS',
+      };
+    });
+    const errMsg = runError && !(runError instanceof FitTestAbortedError8020)
+      ? runError.message
+      : runError instanceof FitTestAbortedError8020
+        ? 'aborted'
+        : undefined;
+    if (this.store && testId > 0) {
+      try {
+        await this.store.endTest(testId, Date.now(), {
+          ffOverall,
+          ffOverallStatus,
+          error: errMsg,
+          exercises: exerciseResults,
+        }, errMsg);
+      } catch (err) {
+        this.cb.log(`fit test (8020): store.endTest: ${(err as Error).message}`);
+      }
+    }
+    if (runError && !(runError instanceof FitTestAbortedError8020)) {
+      this.cb.log(`fit test (8020) failed: ${runError.message}`);
+    } else if (runError instanceof FitTestAbortedError8020) {
+      this.cb.log('fit test (8020): aborted');
+    } else {
+      this.cb.log(`Fit test (8020) result: FF=${ffOverall ?? 'n/a'} ${ffOverallStatus ?? ''}`);
+    }
+
+    // Final status snapshot — sets done:true so the panel collapses.
+    {
+      const final = buildStatus();
+      final.done = true;
+      final.ffOverall = ffOverall;
+      if (ffOverallStatus) final.ffOverallStatus = ffOverallStatus;
+      if (errMsg) final.error = errMsg;
+      this.panel.update(final, { protocolName: chosen.displayName });
+      historyHandle?.updateStatus(final);
+    }
+
+    if (historyHandle && testId > 0) {
+      try { await historyHandle.finalize(testId); } catch (err) {
+        this.cb.log(`fit test (8020): history finalize: ${(err as Error).message}`);
+      }
+    }
+    this.active = null;
+    this.cb.onTestEnded();
+    this.setFormEnabled(true);
   }
 
   /** Open a per-run debug capture. Returns a handle whose `record()` is
@@ -384,7 +688,11 @@ export class FitTestUi {
     this.cb.log('fit test: abort requested');
     this.abortBtn.disabled = true;
     try {
-      await this.active.runner.abort();
+      if (this.active.runner) {
+        await this.active.runner.abort();
+      } else if (this.active.abort8020) {
+        this.active.abort8020.abort(new Error('aborted by user'));
+      }
     } catch (err) {
       this.cb.log(`fit test abort: ${(err as Error).message}`);
     }

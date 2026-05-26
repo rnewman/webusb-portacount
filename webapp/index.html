@@ -49,26 +49,12 @@
 
     <div class="cols">
       <div class="left-col">
-        <section id="log">
-          <h2>
-            Event log
-            <label class="log-toggle">
-              <input type="checkbox" id="xml-trace-toggle">
-              Log XML traffic
-            </label>
-          </h2>
-          <div id="event-log"></div>
-        </section>
-      </div>
-
-      <div class="right-col">
-        <div class="tabs" role="tablist" data-device-tabs="8030">
+        <div class="tabs" role="tablist">
           <button class="tab active" role="tab" data-tab="testruns" aria-selected="true">Test Runs</button>
           <button class="tab" role="tab" data-tab="sampling" aria-selected="false">Sampling</button>
         </div>
-        <section id="pc8020-host" data-device-panel="8020" hidden></section>
 
-        <section class="tab-panel" data-tab-panel="sampling" data-device-panel="8030" hidden>
+        <section class="tab-panel" data-tab-panel="sampling" hidden>
           <div id="sampling-controls" class="sampling-controls">
             <div class="sampling-actions">
               <button id="start-btn" disabled>Start sampling</button>
@@ -87,7 +73,7 @@
           <div id="session-list"></div>
         </section>
 
-        <section class="tab-panel active" data-tab-panel="testruns" data-device-panel="8030">
+        <section class="tab-panel active" data-tab-panel="testruns">
           <div id="fittest-form" class="fittest-form">
             <div class="row primary">
               <label for="ft-name">Name</label>
@@ -97,17 +83,19 @@
               <label for="ft-mask-model">Mask</label>
               <input id="ft-mask-model" type="text" placeholder="3M 8511">
             </div>
+            <div class="row primary protocol-row">
+              <label for="ft-protocol">Protocol</label>
+              <select id="ft-protocol"></select>
+              <label class="checkbox-row n95-inline" title="Device-side measurement adjustment for N95 material. Honored by 8038 / 8030+N95-Companion; metadata-only on 8020.">
+                <input id="ft-mask-n95" type="checkbox"> N95 mode
+              </label>
+            </div>
             <details id="fittest-settings" class="fittest-settings">
               <summary>
                 <span class="ft-summary-label">More settings</span>
-                <span class="ft-summary-protocol" data-current-protocol></span>
                 <span class="ft-chevron" aria-hidden="true"></span>
               </summary>
               <div class="ft-more-grid">
-                <div class="row">
-                  <label for="ft-protocol">Protocol</label>
-                  <select id="ft-protocol"></select>
-                </div>
                 <div class="row">
                   <label for="ft-idnumber">ID number</label>
                   <input id="ft-idnumber" type="text" placeholder="optional">
@@ -127,9 +115,6 @@
                   <div><label for="ft-mask-passlevel">Pass level</label><input id="ft-mask-passlevel" type="number" value="100" min="1" max="64000"></div>
                 </div>
                 <div class="row">
-                  <label class="checkbox-row"><input id="ft-mask-n95" type="checkbox"> N95 mode (device measurement adjustment; 8038 / 8030+N95-Companion only)</label>
-                </div>
-                <div class="row">
                   <label for="ft-operator">Operator</label>
                   <input id="ft-operator" type="text" value="webapp">
                 </div>
@@ -146,9 +131,6 @@
           <div class="testrun-actions">
             <button id="ft-start-btn" disabled>Start fit test</button>
             <button id="ft-abort-btn" disabled>Abort</button>
-            <label class="checkbox-row debug-capture-toggle">
-              <input id="ft-debug-capture" type="checkbox"> Capture debug log
-            </label>
           </div>
           <div id="fittest-panel-host"></div>
           <h2>Tests</h2>
@@ -156,6 +138,21 @@
         </section>
 
       </div>
+
+      <aside class="right-col debug-gutter">
+        <details id="debug-gutter-details" open>
+          <summary>Event log</summary>
+          <div class="debug-tools">
+            <label class="checkbox-row">
+              <input type="checkbox" id="xml-trace-toggle"> Log XML traffic
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="ft-debug-capture"> Capture debug log
+            </label>
+          </div>
+          <div id="event-log"></div>
+        </details>
+      </aside>
     </div>
   </main>
   <div class="git-sha" title="Build revision">%GIT_SHA%</div>

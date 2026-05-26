@@ -74,3 +74,69 @@ export const DEFAULT_PROTOCOLS: NamedProtocol[] = [
   OSHA_QUICK,
   OSHA_FULL,
 ];
+
+// ----- 8020 protocols -----
+//
+// The 8020 has no on-device protocol concept (no PROTOCOL record);
+// these are purely host-side recipes for the host-driven runner.
+// Defaults match the 8020's own configured per-exercise timing
+// (40 s mask sample) so a typical test takes ~60 s/exercise.
+
+const SHARED_TIMINGS_8020 = {
+  ambientPurgeSec: 4,
+  ambientSampleSec: 5,
+  maskPurgeSec: 11,
+  periodSec: 6,
+  endOnExerciseFail: false,
+};
+
+export const PROBE_PROTOCOL_8020: NamedProtocol = {
+  displayName: '8020 probe (1 exercise, 10 s mask)',
+  name: '8020 probe',
+  model: '8020',
+  n95Enable: false,
+  ...SHARED_TIMINGS_8020,
+  exercises: [{ name: 'Normal Breathing', excluded: false, maskSampleSec: 10 }],
+};
+
+export const OSHA_QUICK_8020: NamedProtocol = {
+  displayName: '8020 OSHA quick (4 exercises)',
+  name: '8020 OSHA quick',
+  model: '8020',
+  n95Enable: false,
+  ...SHARED_TIMINGS_8020,
+  exercises: [
+    { name: 'Normal Breathing', excluded: false, maskSampleSec: 40 },
+    { name: 'Deep Breathing', excluded: false, maskSampleSec: 40 },
+    { name: 'Head Side-to-Side', excluded: false, maskSampleSec: 40 },
+    { name: 'Head Up and Down', excluded: false, maskSampleSec: 40 },
+  ],
+};
+
+export const OSHA_FULL_8020: NamedProtocol = {
+  displayName: '8020 OSHA modified ambient (7 exercises)',
+  name: '8020 OSHA modified ambient',
+  model: '8020',
+  n95Enable: false,
+  ...SHARED_TIMINGS_8020,
+  exercises: [
+    { name: 'Normal Breathing', excluded: false, maskSampleSec: 40 },
+    { name: 'Deep Breathing', excluded: false, maskSampleSec: 40 },
+    { name: 'Head Side-to-Side', excluded: false, maskSampleSec: 40 },
+    { name: 'Head Up and Down', excluded: false, maskSampleSec: 40 },
+    { name: 'Talking', excluded: false, maskSampleSec: 40 },
+    { name: 'Bending Over', excluded: false, maskSampleSec: 40 },
+    { name: 'Normal Breathing (2)', excluded: false, maskSampleSec: 40 },
+  ],
+};
+
+export const DEFAULT_PROTOCOLS_8020: NamedProtocol[] = [
+  PROBE_PROTOCOL_8020,
+  OSHA_QUICK_8020,
+  OSHA_FULL_8020,
+];
+
+/** Pick the right protocol list for a device mode. */
+export function protocolsForDevice(deviceMode: '8030' | '8020'): NamedProtocol[] {
+  return deviceMode === '8020' ? DEFAULT_PROTOCOLS_8020 : DEFAULT_PROTOCOLS;
+}

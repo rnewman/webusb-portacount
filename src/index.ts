@@ -94,10 +94,12 @@ export {
   runHostDrivenFitTest,
   FitTestAbortedError8020,
   DEFAULT_CYCLE,
+  DEFAULT_MASK_SAMPLE_SEC,
 } from './8020/host-driven-fit-test';
 export type {
   HostDrivenFitTestOptions,
   HostDrivenFitTestCallbacks,
+  HostDrivenExercise,
   FitTestPhase8020,
   FitTestPhaseInfo,
   FitTestSample,

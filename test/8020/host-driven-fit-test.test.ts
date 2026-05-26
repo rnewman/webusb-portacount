@@ -79,11 +79,10 @@ describe('runHostDrivenFitTest', () => {
       const result = await runHostDrivenFitTest(
         client,
         {
-          exercises: 1,
+          exercises: [{ name: 'Normal Breathing', maskSampleSec: 3 }],
           ambientPurgeSec: 1,
           ambientSampleSec: 3,
           maskPurgeSec: 1,
-          maskSampleSec: 3,
           passLevel: 10,
         },
         {
@@ -127,11 +126,10 @@ describe('runHostDrivenFitTest', () => {
       setTimeout(() => ac.abort(new Error('test-abort')), 500);
       await expect(
         runHostDrivenFitTest(client, {
-          exercises: 1,
+          exercises: [{ name: 'NB', maskSampleSec: 5 }],
           ambientPurgeSec: 2,
           ambientSampleSec: 5,
           maskPurgeSec: 2,
-          maskSampleSec: 5,
           passLevel: 100,
           signal: ac.signal,
         }),
@@ -145,11 +143,13 @@ describe('runHostDrivenFitTest', () => {
     const client = await connect();
     try {
       const result = await runHostDrivenFitTest(client, {
-        exercises: 2,
+        exercises: [
+          { name: 'NB', maskSampleSec: 2 },
+          { name: 'Deep Breathing', maskSampleSec: 2 },
+        ],
         ambientPurgeSec: 1,
         ambientSampleSec: 2,
         maskPurgeSec: 1,
-        maskSampleSec: 2,
         passLevel: 10,
       });
       expect(result.exercises).toHaveLength(2);
